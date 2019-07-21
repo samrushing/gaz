@@ -109,3 +109,14 @@ by just making a note whenever a variable is set! and automagically
 turning it into a ref.  Then, vars that are not set can remain cps
 `letval`, and we can get rid of the cps:let vs cps:letvar distinction.
 
+-------------------------------
+
+Now that we've implemented CwCC, I've been thinking about how to do
+loops.  The 'traditional' technique is to implement loops using normal
+functions, but since we are wanting to avoid defining internal funs at
+all, this leaves us in the lurch.
+
+However... the CwCC paper mentions that letcont can be used to invoke
+continuations recursively.  This is exactly the same thing as 'goto with
+arguments', and really all we need to implement loops and local exits...
+Can we build a useful language by adding direct access to 'appk'?
