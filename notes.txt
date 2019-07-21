@@ -1,0 +1,91 @@
+
+ctbig language
+==============
+
+Thinking of designing a small language for doing constant-time crypto
+that emits LLVM directly.
+
+ * statically typed (no inference, only checking?)
+ * numeric types, fixed-size arrays only.
+
+If we can keep the language simple then it shouldn't be a big project.
+
+Interface to Irken could be tricky - do we embed it as a 'sub-language',
+or interact via FFI?  The latter would make this lang standalone and maybe
+useful for other projects.
+
+Theoretically it could also have a 'C backend'.  [but then, why?]
+
+features
+========
+
+ * expressions
+ * functions
+ * macro/inline/rewrites
+ * loops (transformed to functions)
+ * anything else?
+
+How much of Irken/Scheme do we want?  Pattern matching doesn't seem
+necessary.  Simple loops can still be expressed with recursion & tail
+calls.  I think we still want something macro-like, though, so we can
+say with certainty that something is always inlined.
+
+stages
+======
+
+ * parsing: sexp->node.
+ * rewrite: simplify to almost-llvm.
+ * gen: emit llvm.
+
+So we need at least these types:
+
+ * type: subset of the llvm type system.
+ * node: high-level lang.
+ * low: almost-llvm.
+
+We should try to have type-checking at each stage.
+
+primitives
+==========
+In the low-level language we will have direct access to llvm ops
+like 'mul', 'shr', 'lshl', etc..
+
+These will be the primitives of the core language.  In LLVM these
+prims are overloaded on types [even to the point of supporting
+vectors].  How do we want to do this?  Should we have that same
+'obvious' feature?  I.e., prims operate on different [but compatible]
+types, and the type checker just verifies that?
+
+getting started
+===============
+
+I prefer starting from the end and working backward.  So maybe let's
+start with the llvm output.  We'll need the type system first.
+
+
+
+
+
+
+
+
+
+an idea I had
+-------------
+this isn't relevant, but I wanted to write it down.  for a copying gc,
+instead of continually swapping spaces, could we instead just mmap
+permanently forward in memory, leaving the old spaces behind? on the
+tip of my brain I saw some kind of advantage to this but I lost
+it. think about this some more.
+
+another thing: at least on amd64, the address bus is only 48 bits, leaving
+a whopping 16 bits to play with.  this is in addition to the 3 bits given
+by 8-byte alignment.  this could definitely be used when writing a more
+complex gc.
+
+the two above facts might be related, in that: instead of abusing mmap,
+we just store whatever interesting data we want in the high bits and mask
+them out.
+
+alternatively and insanely, could you save 25% of space in pointers by
+leaving those top two bytes out?

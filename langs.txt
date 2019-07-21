@@ -1,0 +1,111 @@
+
+* clcl c-like crypto language.
+* cps
+* llvm (llt llval llcmp llop llbb llfun)
+
+
+clcl:
+
+  varref
+  varset
+  literal
+  case
+  sequence
+  call
+  let
+  primapp
+  lambda?
+  fix?
+
+no functions or fix, because we don't want lexical environments?
+[in other words, all functions have a single let at the top?]
+hmmm not sure if that will work.  same with lexical environments,
+obviously we don't want those because we can't have them in llvm,
+but since we don't plan on any looping constructs our output code
+will have recursive functions and continuation functions that will
+need to access free variables.  so we'll have to pass those free
+variables down.
+
+But passing free variables down means if we *set* them we need instead
+to pass references.  So in other words we'll need to get rid of all
+lexical environments with closure conversion, or something like that.
+
+Again, getting confused by the implementation language and the input
+language. If our input language does not have lexical environments,
+but some transformation will introduce them, what constraints/freedoms
+does that force that will hinder/help us?
+
+need a concrete example to play with here.
+
+let's talk about a 'join-point' continuation, where we have an <if>
+statement.  That will result in two functions, one for each branch,
+and then a continuation function to carry forward.
+
+If the continuation function references any of the 'local' variables,
+then we will need to have access to them, which means passing them
+down.  So I think this would mean using 'alloca' in the first part,
+and then passing the addresses in.  do we need to worry about
+used/unused, or do we just pass them all?
+
+and this will continue on for each continuation function.
+
+So 'let' will always be an 'alloca' call, as expected.
+
+-------------------------------
+there are lots of different possible approaches to writing this,
+one that has worked well for me in the past is to make a tiny/thin
+language and then implement the whole chain through for just that
+language, and then fill in parts as we go along.
+
+So in this case that would mean a very small/dumb clcl, a very
+small/dumb cps, and then convert to llvm.
+
+so what subset of clcl gets us going?  [or rather, what order to
+try to implement the pieces].
+
+ * literal
+ * primapp
+ * sequence
+ * let
+ * varref
+ * varset
+ * if [not sure we want case/product/sum right away]
+ * call
+
+
+-------------------------------
+
+    - OR -
+
+we could just 'go with the flow' and do what llvm expects, and just
+do an imperative language.  i.e. loops, while, when with <br> back up
+to the top of the loop.  I assume using alloca will preclude the need
+for phi.
+
+this is so simple & straightforward that it's worth doing just as an
+experiment.
+
+so, what would be our main looping construct? "while"?  Or do we go lower
+and allow labels and goto?
+
+
+-------------------------------
+
+Thoughts on 'secret' type.  We want to extend the type system to add a
+'secret' predicate.  Any time data is fetched from a `(secret ...)` datum,
+it contaminates all data derived from it, and we ensure that no secret is
+ever used as a branching condition.  Since `if` is our only way to branch,
+this should be relatively simple, no?
+
+It's important that we don't accidentally introduce a %prim that branches
+on secret data.
+
+-------------------------------
+
+ref, set! etc...
+
+I think it should be possible to automatically do the ML 'ref' thing,
+by just making a note whenever a variable is set! and automagically
+turning it into a ref.  Then, vars that are not set can remain cps
+`letval`, and we can get rid of the cps:let vs cps:letvar distinction.
+
