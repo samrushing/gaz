@@ -2,7 +2,10 @@
 
 ;; TODO
 ;; * convert var/cvar to int
-;; * add functions
+;;   (this turned out to be a Bad Idea - rewrite all hosed because no distinction)
+;; * add functions (maybe?)
+;;   Thought I needed functions for loops, but if instead I expose 'appk' to the user
+;;     we can implement loops/recursion directly with conts.  I think.
 ;; * add types
 
 (typealias var symbol)
@@ -19,7 +22,7 @@
   (:appk cvar var)              ;; k x
   (:app symbol cvar (list var)) ;; f k x0 x1 ...
   (:if var cvar cvar)           ;; if x k1 k2
-  (:dead var cps)               ;; x K (for seq)
+  (:dead cps)                   ;; K (for seq)
   )
 
 (define cps->sexp
@@ -32,7 +35,7 @@
   (cps:appk k x)          -> (sexp (sym 'appk) (sym k) (sym x))
   (cps:app n k vars)      -> (sexp (sym 'app) (sym n) (sym k) (list (map sexp:symbol vars)))
   (cps:if t c a)          -> (sexp (sym 'if) (sym t) (sym c) (sym a))
-  (cps:dead x k)          -> (sexp (sym 'dead) (sym x) (cps->sexp k))
+  (cps:dead k)            -> (sexp (sym 'dead) (cps->sexp k))
   )
 
 (define prims (list '+ '- '* '/ 'and 'or 'xor '<< '>> 'ashr '< '> '<= '>=))
@@ -45,8 +48,8 @@
         (inc! counter)
         (string->symbol (format prefix (int counter))))))
 
-  (define genvar (gensym "X"))
-  (define gencont (gensym "K"))
+  (define genvar (gensym "x"))
+  (define gencont (gensym "L"))
 
   (define (cps-args args vars K)
     (match args with
@@ -72,7 +75,7 @@
              (exp)
              -> (cps-tail exp k)
              (exp . exps)
-             -> (cps exp (lambda (x1) (cps:dead x1 (loop exps))))
+             -> (cps exp (lambda (x1) (cps:dead (loop exps))))
              ))
       (clexp:call name args)
       -> (cps-args
@@ -136,7 +139,7 @@
            (match exps with
              ()        -> (raise (:EmptySequence))
              (one)     -> (cps one K)
-             (hd . tl) -> (cps hd (lambda (x1) (cps:dead x1 (loop tl))))
+             (hd . tl) -> (cps hd (lambda (x1) (cps:dead (loop tl))))
              ))
       (clexp:let name init body)
       -> (let ((j (gencont))
@@ -241,7 +244,7 @@
            (printf "  switch i1 %" (sym r) ", label %" (sym k1) " [i1 0, label %" (sym k2) "]\n"))
       (cps:appk k x)
       -> (branch k x blockname)
-      (cps:dead x K)
+      (cps:dead K)
       -> (emit K blockname)
       (cps:prim name x vars K)
       -> (begin
