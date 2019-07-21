@@ -41,8 +41,7 @@
       (cps:if x k0 k1)        -> (begin (increment-census x)
                                         (increment-census k0)
                                         (increment-census k1))
-      (cps:dead x K)          -> (begin (increment-census x)
-                                        (take-census K))
+      (cps:dead K)            -> (take-census K)
       )
 
     (define (apply-subst S x)
@@ -106,25 +105,8 @@
 		   )
                  (cps:appk k0 y0)
 		 ))
-        (cps:dead x K)
-        -> (cps:dead (apply-subst S x) (simp env S K))
-        ;; ETA-CASE
-        ;; (letcont ki x1
-        ;;   (letval y1 (inj i x1) (appk k y1)
-        ;;      ...
-        ;;      (letcont kj x2
-        ;;         (letval y2 (inj j x2) (appk k y2)
-        ;;         ...
-        ;;         (case x k1 k2)))))
-        ;; =>
-        ;; (appk k x)
-        ;;
-        ;; in english - if we know that x1 is tagged into y1 and fed to k,
-        ;;                     and that x2 is tagged into y2 and also fed to k,
-        ;;              then a (case x k1 k2) can be replaced with (appk k[i|j] x)
-        ;; XXX TODO: ETA-NVCASE
-        ;; XXX TODO: ETA-FUN
-
+        (cps:dead K)
+        -> (cps:dead (simp env S K))
         ;; all others
          _
          -> K
