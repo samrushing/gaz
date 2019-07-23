@@ -5,7 +5,7 @@
 
 (datatype thing
   (:val int)
-  (:cont var cps)
+  (:cont (list var) cps)
   )
 
 (define (rewrite-cps exp)
@@ -25,23 +25,23 @@
 	))
 
     (define take-census
-      (cps:let n x t)         -> (begin (increment-census x) (take-census t))
-      (cps:ref n x t)         -> (begin (increment-census x) (take-census t))
-      (cps:set n x t)         -> (begin (increment-census x) (take-census t))
-      (cps:letval x v t)      -> (take-census t)
-      (cps:letcont k x t0 t1) -> (begin (take-census t0) (take-census t1))
-      (cps:appk k x)	      -> (begin (increment-census k)
-                                        (increment-census x))
-      (cps:app f k args)      -> (begin (increment-census f)
-                                        (increment-census k)
-                                        (for-each increment-census args))
-      (cps:prim n x args t)   -> (begin (increment-census x)
-                                        (for-each increment-census args)
-                                        (take-census t))
-      (cps:if x k0 k1)        -> (begin (increment-census x)
-                                        (increment-census k0)
-                                        (increment-census k1))
-      (cps:dead K)            -> (take-census K)
+      (cps:let n x t)          -> (begin (increment-census x) (take-census t))
+      (cps:ref n x t)          -> (begin (increment-census x) (take-census t))
+      (cps:set n x t)          -> (begin (increment-census x) (take-census t))
+      (cps:letval x v t)       -> (take-census t)
+      (cps:letcont k xs t0 t1) -> (begin (take-census t0) (take-census t1))
+      (cps:appk k xs)          -> (begin (increment-census k)
+                                         (for-each increment-census xs))
+      (cps:app f k args)       -> (begin (increment-census f)
+                                         (increment-census k)
+                                         (for-each increment-census args))
+      (cps:prim n x args t)    -> (begin (increment-census x)
+                                         (for-each increment-census args)
+                                         (take-census t))
+      (cps:if x k0 k1)         -> (begin (increment-census x)
+                                         (increment-census k0)
+                                         (increment-census k1))
+      (cps:dead K)             -> (take-census K)
       )
 
     (define (apply-subst S x)
@@ -50,8 +50,24 @@
 	(maybe:yes y) -> y
 	))
 
+    (define vars-eq?
+      () ()               -> #t
+      (h0 . t0) (h1 . t1) -> (if (eq? h0 h1) (vars-eq? t0 t1) #f)
+      a b                 -> (raise (:BadArity a b))
+      )
+
     (define (extend-subst S k v)
       (tree/insert S symbol-index-cmp k v))
+
+    (define (extend-subst* S ks vs)
+      (match ks vs with
+        () ()
+        -> S
+        (k0 . ks) (v0 . vs)
+        -> (extend-subst* (extend-subst S k0 v0) ks vs)
+        _ _
+        -> (raise (:BadArity ks vs))
+        ))
 
     (define (simp env S K)
 
@@ -69,12 +85,13 @@
         (cps:set name x K)
         -> (cps:set name (apply-subst S x) (simp env S K))
         ;; ETA-CONT
-        (cps:letcont k x0 (cps:appk j x1) K)
-        -> (let ((x2 (apply-subst S x1))
-                 (j2 (apply-subst S j)))
-             (if (eq? x0 x1)
+        (cps:letcont k xs0 (cps:appk j xs1) K)
+        -> (let ((j2 (apply-subst S j)))
+             (if (vars-eq? xs0 xs1)
                  (N 'eta-cont (simp env (extend-subst S k j2) K))
-                 (cps:letcont k x2 (cps:appk j2 x1) (simp env S K))))
+                 (cps:letcont
+                  k (map (lambda (y) (apply-subst S y)) xs1)
+                  (cps:appk j2 xs1) (simp env S K))))
 	;; DEAD-VAL
 	(cps:letval x V L)
 	-> (if (= (census/get x) 0) ;;; XXXXX disabled by use of '<'
@@ -83,27 +100,27 @@
 		 (cps:letval x0 V (simp (alist:entry x0 (thing:val V) env) S L))))
 	;; DEAD-CONT
 	;; XXX I think the paper gets this confusingly wrong...
-	(cps:letcont k x K L)
+	(cps:letcont k xs K L)
         -> (let ((k0 (apply-subst S k))
-                 (x0 (apply-subst S x)))
+                 (xs0 (map (lambda (y) (apply-subst S y)) xs)))
 	     (if (= 0 (census/get k0))
 	         (N 'dead-cont (simp env S L) )
 	         (cps:letcont
-                  k0 x0
+                  k0 xs0
 		  (simp env S K)
-		  (simp (alist:entry k0 (thing:cont x0 K) env) S L)
+		  (simp (alist:entry k0 (thing:cont xs0 K) env) S L)
 		  )))
 	;; BETA-CONT
-	(cps:appk k y)
+	(cps:appk k ys)
 	-> (let ((k0 (apply-subst S k))
-		 (y0 (apply-subst S y)))
+		 (ys0 (map (lambda (x) (apply-subst S x)) ys)))
              (if (= 1 (census/get k0))
                  (match (alist/lookup env k0) with
-                   (maybe:yes (thing:cont x K0))
-		   -> (N 'beta-cont (simp env (extend-subst S x y0) K0))
-                   _ -> (cps:appk k0 y0)
+                   (maybe:yes (thing:cont xs K0))
+		   -> (N 'beta-cont (simp env (extend-subst* S xs ys0) K0))
+                   _ -> (cps:appk k0 ys0)
 		   )
-                 (cps:appk k0 y0)
+                 (cps:appk k0 ys0)
 		 ))
         (cps:dead K)
         -> (cps:dead (simp env S K))

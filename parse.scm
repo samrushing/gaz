@@ -4,20 +4,23 @@
 (require "lib/partial.scm")
 (require "./cps.scm")
 (require "./rewrite.scm")
+;(require "./cps2llvm.scm")
 
 ;; ---- datatypes ----
 
 (datatype clexp
-  (:lit int)                            ;; value
-  (:prim symbol (list clexp))           ;; name args
-  (:seq (list clexp))                   ;; exp ...
-  (:let symbol clexp clexp)             ;; name init body
-  (:ref symbol)                         ;; name
-  (:set symbol clexp)                   ;; name value
-  (:if clexp clexp clexp)               ;; test con ant
-  (:call symbol (list clexp))           ;; name args
-  (:loop symbol symbol clexp clexp)     ;; kname x init body
-  (:appk symbol clexp)                  ;; kname arg
+  (:lit int)                       ;; value
+  (:prim symbol (list clexp))      ;; name args
+  (:seq (list clexp))              ;; exp ...
+  (:let symbol clexp clexp)        ;; name init body
+  (:ref symbol)                    ;; name
+  (:set symbol clexp)              ;; name value
+  (:if clexp clexp clexp)          ;; test con ant
+  (:call symbol (list clexp))      ;; name args
+  (:loop symbol                    ;; name
+         (list (:tuple var clexp)) ;; bindings
+         clexp)                    ;; body
+  (:appk symbol (list clexp))      ;; kname arg
   )
 
 (datatype clfun
@@ -36,8 +39,12 @@
     (clexp:set name val)       -> (sexp (sym 'set) (sym name) (E val))
     (clexp:if t c a)           -> (sexp (sym 'if) (E t) (E c) (E a))
     (clexp:call n args)        -> (sexp (sym 'call) (sym n) (list (map E args)))
-    (clexp:loop n x i b)       -> (sexp (sym 'loop) (sym n) (sym x) (E i) (E b))
-    (clexp:appk n arg)         -> (sexp (sym 'appk) (sym n) (E arg))
+    (clexp:loop n binds b)     -> (sexp (sym 'loop) (sym n)
+                                        (list (map (lambda (:tuple v i)
+                                                     (sexp (sym v) (E i)))
+                                                   binds))
+                                        (E b))
+    (clexp:appk n args)        -> (sexp (sym 'appk) (sym n) (list (map E args)))
     )
   (E exp)
   )
@@ -46,27 +53,33 @@
 
 (define (parse-clexp exp)
 
-  (define p-bindings
+  (define p-let-bindings
     body ()
     -> body
     body ((sexp:list ((sexp:symbol name) init)) . rest)
-    -> (clexp:let name (p-exp init) (p-bindings body rest))
+    -> (clexp:let name (p-exp init) (p-let-bindings body rest))
     body x
     -> (raise (:SyntaxError (sexp:list x)))
     )
 
+  (define p-binding
+    (sexp:list ((sexp:symbol var) init)) -> (:tuple var (p-exp init))
+    x -> (raise (:SyntaxError x))
+    )
+
   (define p-exp-list
-    ((sexp:symbol 'begin) . rest)                 -> (clexp:seq (map p-exp rest))
-    ((sexp:symbol 'set!) (sexp:symbol name) val)  -> (clexp:set name (p-exp val))
-    ((sexp:symbol 'if) test con ant)              -> (clexp:if (p-exp test) (p-exp con) (p-exp ant))
-    ((sexp:symbol 'let) (sexp:list binds) . body) -> (p-bindings (p-body '() body) binds)
-    ((sexp:symbol 'appk) (sexp:symbol kname) arg) -> (clexp:appk kname (p-exp arg))
-    ((sexp:symbol 'loop)
-     (sexp:symbol kname)
-     (sexp:symbol x)
-     init . body)                                 -> (clexp:loop kname x (p-exp init) (p-body '() body))
-    ((sexp:symbol fun) . args)                    -> (clexp:call fun (map p-exp args))
-    x                                             -> (raise (:SyntaxError (sexp:list x)))
+    ((sexp:symbol 'begin) . rest)                  -> (clexp:seq (map p-exp rest))
+    ((sexp:symbol 'set!) (sexp:symbol name) val)   -> (clexp:set name (p-exp val))
+    ((sexp:symbol 'if) test con ant)               -> (clexp:if (p-exp test)
+                                                               (p-exp con)
+                                                               (p-exp ant))
+    ((sexp:symbol 'let) (sexp:list binds)  . body) -> (p-let-bindings (p-body '() body) binds)
+    ((sexp:symbol 'appk) (sexp:symbol k) . args)   -> (clexp:appk kname (map p-exp args))
+    ((sexp:symbol 'loop) (sexp:list binds) . body) -> (clexp:loop kname
+                                                                  (map p-binding binds)
+                                                                  (p-body '() body))
+    ((sexp:symbol fun) . args)                     -> (clexp:call fun (map p-exp args))
+    x                                              -> (raise (:SyntaxError (sexp:list x)))
     )
 
   (define p-formals
@@ -120,6 +133,13 @@
 
 (define (alpha exp args)
 
+  (define (R-binds env acc binds)
+    (match binds with
+      () -> (:tuple (reverse acc) env)
+      ((:tuple v i) . tl)
+      -> (R-binds (extend env v) (list:cons (R env i) acc) tl)
+      ))
+
   (define R
     env (clexp:lit n)          -> (clexp:lit n)
     env (clexp:prim name exps) -> (clexp:prim name (map (partial (R env _)) exps))
@@ -130,10 +150,10 @@
     env (clexp:set name val)   -> (clexp:set (lookup env name) (R env val))
     env (clexp:if t c a)       -> (clexp:if (R env t) (R env c) (R env a))
     env (clexp:call name args) -> (clexp:call name (map (partial (R env _)) args))
-    env (clexp:loop k x i b)   -> (let (((k0 env0) (extend env k))
-                                        ((x0 env1) (extend env0 x)))
-                                    (clexp:loop k0 x0 (R env i) (R env1 b)))
-    env (clexp:appk k arg)     -> (clexp:appk (lookup env k) (R env arg))
+    env (clexp:loop k binds b) -> (let (((k0 env0) (extend env k))
+                                        ((binds0 env1) (R-binds env0 (list:nil) env0)))
+                                    (clexp:loop k0 binds0 (R env1 b)))
+    env (clexp:appk k args)    -> (clexp:appk (lookup env k) (map (partial (R env _)) args))
     )
 
   (define gensym
@@ -162,7 +182,6 @@
   ;;   location in the source.
   (R (initial-env (alist:nil) args) exp)
   )
-
 
 ;; ---- modified pprint ----
 
@@ -210,15 +229,14 @@
         -> (let ((exp1 (alpha exp0 args))
                  (cps0 (clexp->cps exp1))
                  (cps1 (rewrite-cps cps0)))
-             ;; (pp0 exp0 80 0 "; ")
-             ;; (pp0 (clexp->sexp exp0) 80 0 "; ")
+             (pp0 (clexp->sexp exp0) 80 0 "; ")
              ;; (pp0 (clexp->sexp exp1) 80 0 "; ")
-             ;; (pp0 (cps->sexp cps0) 80 0 "; ")
+             (pp0 (cps->sexp cps0) 80 0 "; ")
              (pp0 (cps->sexp cps1) 80 0 "; ")
              ;; (printf "\n")
              ;; (cps->llvm cps0)
              (printf "\n")
-             (cpsfun->llvm name args cps0)
+             ;;(cpsfun->llvm name args cps0)
              )))))
 
 (main)

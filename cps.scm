@@ -9,9 +9,14 @@
 ;;      pro: all cps remains simple
 ;;      con: we have to convert to/from tuple repr for
 ;;           nary functions and conts.
-;; * <, >, etc.. (requires bool type tho, maybe)
+;; * get rid of let/ref/set.  the right way to do this is to
+;;   extend the universe of values to include 'ref' values, then just
+;;   use letval. set! becomes a prim.  but I'm pretty sure this
+;;   requires types.
 ;; * convert var/cvar to int
 ;;   (this turned out to be a Bad Idea - rewrite all hosed because no distinction)
+;;   might want to explore this again later using a real datatype for the various
+;;   var types.
 ;; * add functions (maybe?)
 ;;   Thought I needed functions for loops, but if instead I expose 'appk' to the user
 ;;     we can implement loops/recursion directly with conts.  I think.
@@ -22,29 +27,35 @@
 (typealias val int)
 
 (datatype cps
-  (:let symbol var cps)         ;; let u = x in L
-  (:ref symbol var cps)         ;; u
-  (:set symbol var cps)         ;; set! u x
-  (:prim symbol var (list var) cps) ;; x + y
-  (:letval var val cps)         ;; letval x = V in L
-  (:letcont cvar var cps cps)   ;; letcont k x = K in L
-  (:appk cvar var)              ;; k x
-  (:app symbol cvar (list var)) ;; f k x0 x1 ...
-  (:if var cvar cvar)           ;; if x k1 k2
-  (:dead cps)                   ;; K (for seq)
+  (:let symbol var cps)              ;; let u = x in L
+  (:ref symbol var cps)              ;; u
+  (:set symbol var cps)              ;; set! u x
+  (:prim symbol var (list var) cps)  ;; x + y
+  (:letval var val cps)              ;; letval x = V in L
+  (:letcont cvar (list var) cps cps) ;; letcont k x0 x1 ... = K in L
+  (:appk cvar (list var))            ;; k x0 x1 ...
+  (:app symbol cvar (list var))      ;; f k x0 x1 ...
+  (:if var cvar cvar)                ;; if x k1 k2
+  (:dead cps)                        ;; K (for seq)
   )
 
 (define cps->sexp
-  (cps:let n x k)         -> (sexp (sym 'let) (sym n) (sym x) (cps->sexp k))
-  (cps:ref n x k)         -> (sexp (sym 'ref) (sym n) (sym x) (cps->sexp k))
-  (cps:set n x k)         -> (sexp (sym 'set) (sym n) (sym x) (cps->sexp k))
-  (cps:prim n x vars k)   -> (sexp (sym 'prim) (sym n) (sym x) (list (map sexp:symbol vars)) (cps->sexp k))
-  (cps:letval x v k)      -> (sexp (sym 'letval) (sym x) (int v) (cps->sexp k))
-  (cps:letcont k x t0 t1) -> (sexp (sym 'letcont) (sym k) (sym x) (cps->sexp t0) (cps->sexp t1))
-  (cps:appk k x)          -> (sexp (sym 'appk) (sym k) (sym x))
-  (cps:app n k vars)      -> (sexp (sym 'app) (sym n) (sym k) (list (map sexp:symbol vars)))
-  (cps:if t c a)          -> (sexp (sym 'if) (sym t) (sym c) (sym a))
-  (cps:dead k)            -> (sexp (sym 'dead) (cps->sexp k))
+  (cps:let n x k)          -> (sexp (sym 'let) (sym n) (sym x) (cps->sexp k))
+  (cps:ref n x k)          -> (sexp (sym 'ref) (sym n) (sym x) (cps->sexp k))
+  (cps:set n x k)          -> (sexp (sym 'set) (sym n) (sym x) (cps->sexp k))
+  (cps:prim n x vars k)    -> (sexp (sym 'prim) (sym n) (sym x)
+                                    (list (map sexp:symbol vars))
+                                    (cps->sexp k))
+  (cps:letval x v k)       -> (sexp (sym 'letval) (sym x) (int v) (cps->sexp k))
+  (cps:letcont k xs t0 t1) -> (sexp (sym 'letcont) (sym k)
+                                    (list (map sexp:symbol xs))
+                                    (cps->sexp t0) (cps->sexp t1))
+  (cps:appk k xs)          -> (sexp (sym 'appk) (sym k)
+                                    (list (map sexp:symbol xs)))
+  (cps:app n k vars)       -> (sexp (sym 'app) (sym n) (sym k)
+                                    (list (map sexp:symbol vars)))
+  (cps:if t c a)           -> (sexp (sym 'if) (sym t) (sym c) (sym a))
+  (cps:dead k)             -> (sexp (sym 'dead) (cps->sexp k))
   )
 
 (define prims (list '+ '- '* '/ 'and 'or 'xor '<< '>> 'ashr '= '<> '< '> '<= '>=))
@@ -70,6 +81,13 @@
       (hd . tl) -> (cps hd (lambda (v) (cps-args tl (list:cons v vars) K)))
       ))
 
+  (define (zip items)
+    (define loop
+      acc0 acc1 ()                    -> (:tuple (reverse acc0) (reverse acc1))
+      acc0 acc1 ((:tuple a b) . rest) -> (loop (list:cons a acc0) (list:cons b acc1) rest)
+      )
+    (loop (list:nil) (list:nil) items))
+
   ;; This is the square-bracket [[X]] conversion from CwCC
   (define (cps exp K)
     (match exp with
@@ -89,7 +107,7 @@
                  (lambda (vars)
                    (cps:prim name x vars (K x)))
                  (lambda (vars)
-                   (cps:letcont k x (K x) (cps:app name k vars))))))
+                   (cps:letcont k (list x) (K x) (cps:app name k vars))))))
       (clexp:seq exps)
       -> (let loop ((exps exps))
            (match exps with
@@ -101,7 +119,7 @@
       -> (let ((j (gencont))
                (x0 (genvar)))
            (cps:letcont
-            j x0
+            j (list x0)
             (cps:let name x0 (cps body K))
             (cps-tail init j)))
       (clexp:if test con ant)
@@ -115,20 +133,39 @@
             test
             (lambda (z)
               (cps:letcont
-               j x (K x)
+               j (list x) (K x)
                (cps:letcont
-                k1 x1 (cps-tail con j)
+                k1 (list x1) (cps-tail con j)
                 (cps:letcont
-                 k2 x2 (cps-tail ant j)
+                 k2 (list x2) (cps-tail ant j)
                  (cps:if z k1 k2))))))
            )
-      (clexp:loop k x init body)
-      -> (let ((x0 (genvar)))
+      ;; XXX a brain-twister, this.  ok, I think we need to look
+      ;;   at how <inits> are done.  I think we might need to consider
+      ;;   how an <init> finishes with an <appk>.  In our case we want
+      ;;   the inits (plural) to finish with (appk k x0 x1 ...).  we need
+      ;;   to go _back_ and see how complex inits & args are put together
+      ;;   _before_ we made all this change.
+      (clexp:loop k binds body)
+      -> (let (((vars inits) (zip binds)))
+           (cps-args
+            inits '()
+            (lambda (vars)
+              (cps:letcont
+               k vars
+               (cps-tail body k)
+               (cps-args 
            (cps:letcont
-            k x0
-            (cps:let x x0 (cps init K))
-            (cps-tail init k)))
-      (clexp:appk k x)
+            k vars
+            (cps-tail body k)
+            (cps-args 
+           (cps-args
+            inits '()
+            (lambda (vars)
+              (cps:letcont
+               k vars
+               (cps-tail body k)))))
+      (clexp:appk k xs)
       -> (raise (:NonTailAppK))
       x
       -> (raise (:NotYet x))
@@ -140,12 +177,12 @@
     (match exp with
       (clexp:lit n)
       -> (let ((x (genvar)))
-           (cps:letval x n (cps:appk k x)))
+           (cps:letval x n (cps:appk k (list x))))
       ;; (clexp:ref s)
       ;; -> (cps:appk k s)
       (clexp:ref s)
       -> (let ((x (genvar)))
-           (cps:ref s x (cps:appk k x)))
+           (cps:ref s x (cps:appk k (list x))))
       (clexp:seq exps)
       -> (let loop ((exps exps))
            (match exps with
@@ -162,13 +199,13 @@
           (if (member-eq? name prims)
               (lambda (vars)
                 (let ((x (genvar)))
-                  (cps:prim name x vars (cps:appk k x))))
+                  (cps:prim name x vars (cps:appk k (list x)))))
               (lambda (vars) (cps:app name k vars))))
       (clexp:let name init body)
       -> (let ((j (gencont))
                (x0 (genvar)))
            (cps:letcont
-            j x0
+            j (list x0)
             (cps:let name x0 (cps-tail body k))
             (cps-tail init j)))
       ;; (clexp:let name init body)
@@ -183,18 +220,18 @@
             test
             (lambda (z)
              (cps:letcont
-              k1 x1 (cps-tail con k)
+              k1 (list x1) (cps-tail con k)
               (cps:letcont
-               k2 x2 (cps-tail ant k)
+               k2 (list x2) (cps-tail ant k)
                (cps:if z k1 k2))))))
       (clexp:loop k0 x init body)
       -> (let ((x0 (genvar)))
            (cps:letcont
-            k0 x0
+            k0 (list x0)
             (cps:let x x0 (cps-tail body k))
             (cps-tail init k0)))
       (clexp:appk k val)
-      -> (^bogus val (lambda (v) (cps:appk k v)))
+      -> (cps-args (list val) '() (lambda (vars) (cps:appk k vars)))
       ;; XXX probably not
       (clexp:set name exp)
       -> (raise (:DeadTail))
@@ -211,155 +248,3 @@
 
   )
 
-;; --------------------------------------------------------------------------------
-;; sample direct LLVM output.
-;; --------------------------------------------------------------------------------
-
-;; for this test I'm just going to emit text.
-(define (cpsfun->llvm name args exp)
-
-  (let ((phimap (alist:nil))
-        (venv (alist:nil)))
-
-    (define gensym
-      (let ((counter 0))
-        (lambda ()
-          (inc! counter)
-          (string->symbol (format "r" (int counter))))))
-
-    (define (pass1 exp blockname)
-      (match exp with
-        (cps:let name x K)       -> (pass1 K blockname)
-        (cps:ref name x K)       -> (pass1 K blockname)
-        (cps:set name x K)       -> (pass1 K blockname)
-        (cps:letval x V K)       -> (begin (alist/push venv x V) (pass1 K blockname))
-        (cps:letcont k x K L)    -> (begin (pass1 L blockname) (pass1 K k))
-        (cps:if x k1 k2)         -> #u
-        (cps:appk k x)           -> (alist/push phimap k (:tuple x blockname))
-        (cps:dead K)             -> (pass1 K blockname)
-        (cps:prim name x vars K) -> (pass1 K blockname)
-        (cps:app name k vars)    -> #u
-        ))
-
-    (define (emit-phi blockname x)
-      (let loop ((acc (list:nil))
-                 (phimap phimap))
-        (match phimap with
-          (alist:nil)
-          -> (if (> (length acc) 0)
-                 (printf "  %" (sym x) " = phi i64 [ " (join " ], [ " acc) " ]\n"))
-          (alist:entry ktrg (:tuple x ksrc) rest)
-          -> (if (eq? ktrg blockname)
-                 (loop (list:cons (format (valref x) ", %" (sym ksrc)) acc) rest)
-                 (loop acc rest))
-          )))
-
-    (define (valref x)
-      (match (alist/lookup venv x) with
-        (maybe:yes v) -> (format (int v))
-        (maybe:no)    -> (format "%" (sym x))
-        ))
-
-    (define (emit exp blockname)
-      (match exp with
-        (cps:let name x K)
-        -> (begin
-             (printf "  %u" (sym name) " = alloca i64\n")
-             (printf "  store i64 " (valref x) ", i64* %u" (sym name) "\n")
-             (emit K blockname))
-        (cps:ref name x K)
-        -> (begin
-             (printf "  %" (sym x) " = load i64, i64* %u" (sym name) "\n")
-             (emit K blockname))
-        (cps:set name x K)
-        -> (begin
-             (printf "  store i64 " (valref x) ", i64* %u" (sym name) "\n")
-             (emit K blockname))
-        (cps:letval x V K)
-        -> (emit K blockname)
-        (cps:letcont k x K L)
-        -> (begin
-             (emit L blockname)
-             ;; note: L is the init, and is in the current block
-             (printf "\n" (sym k) ":\n") ;; label
-             (emit-phi k x)              ;; [ %x4, %block ]
-             (emit K k)                  ;; with new blockname
-             )
-        (cps:if x k1 k2)
-        -> (let ((r (gensym)))
-             (printf "  %" (sym r) " = icmp ne i64 " (valref x) ", 0\n")
-             (printf "  switch i1 %" (sym r) ", label %" (sym k1) " [i1 0, label %" (sym k2) "]\n"))
-        (cps:appk k x)
-        -> (branch k x blockname)
-        (cps:dead K)
-        -> (emit K blockname)
-        (cps:prim name x vars K)
-        -> (begin
-             (emit-prim name x vars)
-             (emit K blockname))
-        (cps:app name k vars)
-        -> (let ((r (gensym)))
-             (printf "  %" (sym r) " = call i64 @" (sym name) " ("
-                     (join (lambda (x) (format "i64 " (valref x))) ", " vars)
-                     ")\n")
-             (branch k r blockname))
-        )
-      )
-
-    ;; phimap must be done in a separate pass.
-
-    (define (branch k x blockname)
-      (match k with
-        'halt -> (printf "  ret i64 " (valref x) "\n")
-        k     -> (printf "  br label %" (sym k) "\n")
-        ))
-
-    (define icmp-alist
-      (alist/make
-       ('= "eq")
-       ('<> "ne")
-       ('> "ugt")
-       ('>= "uge")
-       ('< "ult")
-       ('<= "ule")
-       ;; for now, no signed arithmetic.
-       ))
-
-    (define binop-alist
-      (alist/make
-       ('+ "add")
-       ('- "sub")
-       ('* "mul")
-       ('/ "udiv")
-       ('and "and")
-       ('or "or")
-       ('xor "xor")
-       ('ashr "ashr")
-       ('<< "shl")
-       ('>> "shr")
-       ))
-
-    (define (emit-prim name x vars)
-      (let ((args (map valref vars)))
-        (match (alist/lookup icmp-alist name) with
-          (maybe:yes code)
-          -> (let ((r (gensym)))
-               (printf "  %" (sym r) " = icmp " code " i64 " (join ", " args) "\n")
-               (printf "  %" (sym x) " = zext i1 %r" (sym r) " to i64\n"))
-          (maybe:no)
-          -> (match (alist/lookup binop-alist name) with
-               (maybe:yes op)
-               -> (printf "  %" (sym x) " = " op " i64 " (join ", " args) "\n")
-               (maybe:no)
-               -> (raise (:NoSuchPrim name))
-               ))))
-
-    (printf "define i64 @" (sym name) "("
-            (join (lambda (x) (format "i64 %u" (sym x))) ", " args)
-            ") {\n")
-    (printf "top:\n")
-    (pass1 exp 'top)
-    (emit exp 'top)
-    (printf "}\n")
-    )
-  )
