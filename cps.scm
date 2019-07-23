@@ -47,7 +47,7 @@
   (cps:dead k)            -> (sexp (sym 'dead) (cps->sexp k))
   )
 
-(define prims (list '+ '- '* '/ 'and 'or 'xor '<< '>> 'ashr '< '> '<= '>=))
+(define prims (list '+ '- '* '/ 'and 'or 'xor '<< '>> 'ashr '= '<> '< '> '<= '>=))
 
 ;; --------------
 ;; CPS conversion
@@ -314,27 +314,45 @@
         k     -> (printf "  br label %" (sym k) "\n")
         ))
 
-    (define translate-prim
-      ;; XXX this should probably be a formatting function so we can translate
-      ;;     prims into multiple lines if necessary. (like "<" & ">", though those
-      ;;     require a typed cps for i1).
-      '+    -> "add"
-      '-    -> "sub"
-      '*    -> "mul"
-      '/    -> "udiv"
-      'and  -> "and"
-      'or   -> "or"
-      'xor  -> "xor"
-      'ashr -> "ashr"
-      '<<   -> "shl"
-      '>>   -> "shr"
-      x  -> (raise (:UnknownPrim x))
-      )
+    (define icmp-alist
+      (alist/make
+       ('= "eq")
+       ('<> "ne")
+       ('> "ugt")
+       ('>= "uge")
+       ('< "ult")
+       ('<= "ule")
+       ;; for now, no signed arithmetic.
+       ))
+
+    (define binop-alist
+      (alist/make
+       ('+ "add")
+       ('- "sub")
+       ('* "mul")
+       ('/ "udiv")
+       ('and "and")
+       ('or "or")
+       ('xor "xor")
+       ('ashr "ashr")
+       ('<< "shl")
+       ('>> "shr")
+       ))
 
     (define (emit-prim name x vars)
-      (printf "  %" (sym x) " = " (translate-prim name) " i64 "
-              (join valref ", " vars)
-              "\n"))
+      (let ((args (map valref vars)))
+        (match (alist/lookup icmp-alist name) with
+          (maybe:yes code)
+          -> (let ((r (gensym)))
+               (printf "  %" (sym r) " = icmp " code " i64 " (join ", " args) "\n")
+               (printf "  %" (sym x) " = zext i1 %r" (sym r) " to i64\n"))
+          (maybe:no)
+          -> (match (alist/lookup binop-alist name) with
+               (maybe:yes op)
+               -> (printf "  %" (sym x) " = " op " i64 " (join ", " args) "\n")
+               (maybe:no)
+               -> (raise (:NoSuchPrim name))
+               ))))
 
     (printf "define i64 @" (sym name) "("
             (join (lambda (x) (format "i64 %u" (sym x))) ", " args)
