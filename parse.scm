@@ -16,10 +16,12 @@
   (:set symbol clexp)                   ;; name value
   (:if clexp clexp clexp)               ;; test con ant
   (:call symbol (list clexp))           ;; name args
+  (:loop symbol symbol clexp clexp)     ;; kname x init body
+  (:appk symbol clexp)                  ;; kname arg
   )
 
 (datatype clfun
-  (:t name (list symbol) clexp)
+  (:t symbol (list symbol) clexp)
   )
 
 ;; ---- unparse ----
@@ -34,6 +36,8 @@
     (clexp:set name val)       -> (sexp (sym 'set) (sym name) (E val))
     (clexp:if t c a)           -> (sexp (sym 'if) (E t) (E c) (E a))
     (clexp:call n args)        -> (sexp (sym 'call) (sym n) (list (map E args)))
+    (clexp:loop n x i b)       -> (sexp (sym 'loop) (sym n) (sym x) (E i) (E b))
+    (clexp:appk n arg)         -> (sexp (sym 'appk) (sym n) (E arg))
     )
   (E exp)
   )
@@ -56,6 +60,11 @@
     ((sexp:symbol 'set!) (sexp:symbol name) val)  -> (clexp:set name (p-exp val))
     ((sexp:symbol 'if) test con ant)              -> (clexp:if (p-exp test) (p-exp con) (p-exp ant))
     ((sexp:symbol 'let) (sexp:list binds) . body) -> (p-bindings (p-body '() body) binds)
+    ((sexp:symbol 'appk) (sexp:symbol kname) arg) -> (clexp:appk kname (p-exp arg))
+    ((sexp:symbol 'loop)
+     (sexp:symbol kname)
+     (sexp:symbol x)
+     init . body)                                 -> (clexp:loop kname x (p-exp init) (p-body '() body))
     ((sexp:symbol fun) . args)                    -> (clexp:call fun (map p-exp args))
     x                                             -> (raise (:SyntaxError (sexp:list x)))
     )
@@ -74,18 +83,17 @@
     acc (exp . rest) -> (p-body (list:cons (p-exp exp) acc) rest)
     )
 
-  ;; make this instead the entry point, and segregate the result into
-  ;; functions and a single body.  [or maybe replace clfun with clfix]
-  ;; [in irken this would be 'parse-body', which might include definitions,
-  ;;  which are arranged into a fix after toposort].
-  (define p-define
-    ((sexp:symbol 'define)
-     (sexp:list ((sexp:symbol name) . formals))
-     . body)
-    -> (clfun:t name (p-formals '() formals) (p-body '() body))
-    exp
-    -> (raise (:SyntaxError (sexp:list exp)))
-    )
+  (define (parse exp)
+    (match exp with
+      ;; function definition
+      (sexp:list ((sexp:symbol 'define) (sexp:list ((sexp:symbol name) . formals)) . body))
+      -> (:fun (clfun:t name (p-formals '() formals) (p-body '() body)))
+      (sexp:list ((sexp:symbol 'define) (sexp:symbol name) exp))
+      ;; global variable definition
+      -> (raise (:NotImplemented exp))
+      exp
+      -> (:exp (p-exp exp))
+      ))
 
   (define p-exp
     (sexp:int v)    -> (clexp:lit v)
@@ -94,14 +102,23 @@
     x               -> (raise (:SyntaxError x))
     )
 
-  (p-exp exp)
+  (parse exp)
   )
+
+(define (parse-toplevel forms)
+  (let ((exps (list:nil))
+        (funs (list:nil)))
+    (for-list form forms
+      (match (parse-clexp form) with
+        (:fun f) -> (push! funs f)
+        (:exp e) -> (push! exps e)
+        ))
+    (:tuple (reverse funs) (reverse exps))
+    ))
 
 ;; ---- alpha conversion (renaming) ----
 
-;; XXX I wonder if this is even needed? for inlining? will we be doing inlining?
-
-(define (alpha exp)
+(define (alpha exp args)
 
   (define R
     env (clexp:lit n)          -> (clexp:lit n)
@@ -113,6 +130,10 @@
     env (clexp:set name val)   -> (clexp:set (lookup env name) (R env val))
     env (clexp:if t c a)       -> (clexp:if (R env t) (R env c) (R env a))
     env (clexp:call name args) -> (clexp:call name (map (partial (R env _)) args))
+    env (clexp:loop k x i b)   -> (let (((k0 env0) (extend env k))
+                                        ((x0 env1) (extend env0 x)))
+                                    (clexp:loop k0 x0 (R env i) (R env1 b)))
+    env (clexp:appk k arg)     -> (clexp:appk (lookup env k) (R env arg))
     )
 
   (define gensym
@@ -131,11 +152,17 @@
       (maybe:no)        -> (raise (:UnknownVariable name))
       ))
 
+  (define initial-env
+    acc ()        -> acc
+    acc (hd . tl) -> (initial-env (alist:entry hd hd acc) tl)
+    )
+
   ;; XXX this is where we lose all info about renamings!  in a real compiler we should
   ;;   keep a global map of such renamings, so we can trace any variable to its original
   ;;   location in the source.
-  (R (alist:nil) exp)
+  (R (initial-env (alist:nil) args) exp)
   )
+
 
 ;; ---- modified pprint ----
 
@@ -173,21 +200,25 @@
 
 (define (main)
   (let ((ipath sys.argv[1])
-        (forms (read-file ipath)))
-    (for-list form forms
-      (let ((exp0 (parse-clexp form))
-            (exp1 (alpha exp0))
-            (cps0 (clexp->cps exp1))
-            (cps1 (rewrite-cps cps0)))
-        (pp0 form 80 0 "; ")
-        (pp0 (clexp->sexp exp0) 80 0 "; ")
-        (pp0 (clexp->sexp exp1) 80 0 "; ")
-        (pp0 (cps->sexp cps0) 80 0 "; ")
-        (pp0 (cps->sexp cps1) 80 0 "; ")
-        (printf "\n")
-        (cps->llvm cps0)
-        (printf "\n")
-        (cps->llvm cps1)
-      ))))
+        (forms (read-file ipath))
+        ((funs exps) (parse-toplevel forms)))
+    (when (> (length exps) 0)
+      (raise (:NoToplevelExps)))
+    (for-list fun funs
+      (match fun with
+        (clfun:t name args exp0)
+        -> (let ((exp1 (alpha exp0 args))
+                 (cps0 (clexp->cps exp1))
+                 (cps1 (rewrite-cps cps0)))
+             ;; (pp0 exp0 80 0 "; ")
+             ;; (pp0 (clexp->sexp exp0) 80 0 "; ")
+             ;; (pp0 (clexp->sexp exp1) 80 0 "; ")
+             ;; (pp0 (cps->sexp cps0) 80 0 "; ")
+             (pp0 (cps->sexp cps1) 80 0 "; ")
+             ;; (printf "\n")
+             ;; (cps->llvm cps0)
+             (printf "\n")
+             (cpsfun->llvm name args cps0)
+             )))))
 
 (main)
