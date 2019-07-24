@@ -5,7 +5,7 @@
 (require "./read.scm")
 (require "./types.scm")
 (require "./cps.scm")
-;(require "./rewrite.scm")
+(require "./rewrite.scm")
 ;(require "./cps2llvm.scm")
 
 ;; ---- datatypes ----
@@ -17,7 +17,7 @@
   (:let symbol vtype clexp clexp)  ;; name vtype init body
   (:ref symbol)                    ;; name
   (:set symbol clexp)              ;; name value
-  (:if clexp clexp clexp)          ;; test con ant
+  (:if clexp clexp clexp)          ;; test con alt
   (:call symbol (list clexp))      ;; name args
   (:loop symbol                    ;; loopname,
          (list (:tuple (:tuple symbol vtype) clexp)) ;; inits,
@@ -98,7 +98,7 @@
   (define p-exp-list
     ((sexp:symbol 'begin) . rest)                  -> (clexp:seq (map p-exp rest))
     ((sexp:symbol 'set!) (sexp:symbol name) val)   -> (clexp:set name (p-exp val))
-    ((sexp:symbol 'if) test con ant)               -> (clexp:if (p-exp test) (p-exp con) (p-exp ant))
+    ((sexp:symbol 'if) test con alt)               -> (clexp:if (p-exp test) (p-exp con) (p-exp alt))
     ((sexp:symbol 'let) (sexp:list binds)  . body) -> (p-let-bindings (p-body '() body) binds)
     ((sexp:symbol 'appk) (sexp:symbol k) . args)   -> (clexp:appk k (map p-exp args))
     ((sexp:symbol 'let)
@@ -258,9 +258,13 @@
       (match fun with
         (clfun:t name args exp0)
         -> (let ((exp1 (alpha exp0 args))
-                 (cps0 (clexp->cps exp1)))
+                 (types (clexp->types exp1))
+                 (cps0 (clexp->cps exp1))
+                 (cps1 (rewrite-cps cps0)))
+             (dump-type-map types)
              (pp0 (clexp->sexp exp1) 80 0 "; ")
              (pp0 (cps->sexp cps0) 80 0 "; ")
+             (pp0 (cps->sexp cps1) 80 0 "; ")
              ))
         ;; -> (let ((exp1 (alpha exp0 args))
         ;;          (cps0 (clexp->cps exp1))
