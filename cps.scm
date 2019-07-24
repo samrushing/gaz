@@ -1,18 +1,16 @@
 ;; -*- Mode: Irken -*-
 
 ;; TODO
-;; * either:
-;;   1) make letcont n-ary (so we can do full "let loop")
-;;      pro: SSA supports multiple phi, so should we?
-;;      con: rewrite/etc maybe too complex.
-;;   2) implement tuples as in ML/CwCC
-;;      pro: all cps remains simple
-;;      con: we have to convert to/from tuple repr for
-;;           nary functions and conts.
-;; * get rid of let/ref/set.  the right way to do this is to
-;;   extend the universe of values to include 'ref' values, then just
-;;   use letval. set! becomes a prim.  but I'm pretty sure this
-;;   requires types.
+;; * consider making clexp:let n-ary rather than devolving it into let*.
+;; * add types
+;;   we need to extend the universe of values.
+;;   previously we had `cons` & `int`.  for crypto we want
+;;     the T=i<n>|<vector T> typeset.  we also probably need
+;;     a separate `ref` type.  But what can it contain?
+;;    [or yet, like in smlnj is a ref type equiv to a length-one vector?]
+;;   ok, I've added typed variable bindings (in define, let, and let-loop).
+;;   the next step is to infer/propagate all types.
+;;
 ;; * convert var/cvar to int
 ;;   (this turned out to be a Bad Idea - rewrite all hosed because no distinction)
 ;;   might want to explore this again later using a real datatype for the various
@@ -20,7 +18,6 @@
 ;; * add functions (maybe?)
 ;;   Thought I needed functions for loops, but if instead I expose 'appk' to the user
 ;;     we can implement loops/recursion directly with conts.  I think.
-;; * add types
 
 (typealias var symbol)
 (typealias cvar symbol)
@@ -132,12 +129,6 @@
                  k2 (list x2) (cps-tail ant j)
                  (cps:if z k1 k2))))))
            )
-      ;; XXX a brain-twister, this.  ok, I think we need to look
-      ;;   at how <inits> are done.  I think we might need to consider
-      ;;   how an <init> finishes with an <appk>.  In our case we want
-      ;;   the inits (plural) to finish with (appk k x0 x1 ...).  we need
-      ;;   to go _back_ and see how complex inits & args are put together
-      ;;   _before_ we made all this change.
       (clexp:loop k binds body)
       -> (let (((vars inits) (zip binds))
                (k0 (gencont))
@@ -167,12 +158,9 @@
       (clexp:seq exps)
       -> (let loop ((exps exps))
            (match exps with
-             ()
-             -> (raise (:EmptySequence))
-             (exp)
-             -> (cps-tail exp k)
-             (exp . exps)
-             -> (cps exp (lambda (x1) (cps:dead (loop exps))))
+             ()           -> (raise (:EmptySequence))
+             (exp)        -> (cps-tail exp k)
+             (exp . exps) -> (cps exp (lambda (x1) (cps:dead (loop exps))))
              ))
       (clexp:call name args)
       -> (cps-args
