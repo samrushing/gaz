@@ -27,9 +27,6 @@
 (typealias val int)
 
 (datatype cps
-  (:let symbol var cps)              ;; let u = x in L
-  (:ref symbol var cps)              ;; u
-  (:set symbol var cps)              ;; set! u x
   (:prim symbol var (list var) cps)  ;; x + y
   (:letval var val cps)              ;; letval x = V in L
   (:letcont cvar (list var) cps cps) ;; letcont k x0 x1 ... = K in L
@@ -40,9 +37,6 @@
   )
 
 (define cps->sexp
-  (cps:let n x k)          -> (sexp (sym 'let) (sym n) (sym x) (cps->sexp k))
-  (cps:ref n x k)          -> (sexp (sym 'ref) (sym n) (sym x) (cps->sexp k))
-  (cps:set n x k)          -> (sexp (sym 'set) (sym n) (sym x) (cps->sexp k))
   (cps:prim n x vars k)    -> (sexp (sym 'prim) (sym n) (sym x)
                                     (list (map sexp:symbol vars))
                                     (cps->sexp k))
@@ -92,13 +86,12 @@
   (define (cps exp K)
     (match exp with
       (clexp:lit n)
-      -> (let ((x0 (genvar)))
-           (cps:letval x0 n (K x0)))
-      (clexp:ref s)
       -> (let ((x (genvar)))
-           (cps:ref s x (K x)))
+           (cps:letval x n (K x)))
+      (clexp:ref s)
+      -> (K s)
       (clexp:set name exp)
-      -> (^bogus exp (lambda (z) (cps:set name z (K 'dead))))
+      -> (raise (:NotImplemented (clexp->sexp exp)))
       (clexp:call name args)
       -> (let ((x (genvar))
                (k (gencont)))
@@ -116,11 +109,10 @@
              (hd . tl) -> (cps hd (lambda (x1) (cps:dead (loop tl))))
              ))
       (clexp:let name init body)
-      -> (let ((j (gencont))
-               (x0 (genvar)))
+      -> (let ((j (gencont)))
            (cps:letcont
-            j (list x0)
-            (cps:let name x0 (cps body K))
+            j (list name)
+            (cps body K)
             (cps-tail init j)))
       (clexp:if test con ant)
       -> (let ((j (gencont))
@@ -129,7 +121,7 @@
                (x2 (genvar))
                (k1 (gencont))
                (k2 (gencont)))
-           (^bogus
+           (cps
             test
             (lambda (z)
               (cps:letcont
@@ -147,24 +139,16 @@
       ;;   to go _back_ and see how complex inits & args are put together
       ;;   _before_ we made all this change.
       (clexp:loop k binds body)
-      -> (let (((vars inits) (zip binds)))
+      -> (let (((vars inits) (zip binds))
+               (k0 (gencont))
+               (x0 (genvar)))
            (cps-args
             inits '()
-            (lambda (vars)
+            (lambda (vars0)
               (cps:letcont
                k vars
                (cps-tail body k)
-               (cps-args 
-           (cps:letcont
-            k vars
-            (cps-tail body k)
-            (cps-args 
-           (cps-args
-            inits '()
-            (lambda (vars)
-              (cps:letcont
-               k vars
-               (cps-tail body k)))))
+               (cps:letcont k0 (list x0) (K x0) (cps:appk k vars0))))))
       (clexp:appk k xs)
       -> (raise (:NonTailAppK))
       x
@@ -178,11 +162,8 @@
       (clexp:lit n)
       -> (let ((x (genvar)))
            (cps:letval x n (cps:appk k (list x))))
-      ;; (clexp:ref s)
-      ;; -> (cps:appk k s)
       (clexp:ref s)
-      -> (let ((x (genvar)))
-           (cps:ref s x (cps:appk k (list x))))
+      -> (cps:appk k (list s))
       (clexp:seq exps)
       -> (let loop ((exps exps))
            (match exps with
@@ -202,21 +183,17 @@
                   (cps:prim name x vars (cps:appk k (list x)))))
               (lambda (vars) (cps:app name k vars))))
       (clexp:let name init body)
-      -> (let ((j (gencont))
-               (x0 (genvar)))
+      -> (let ((j (gencont)))
            (cps:letcont
-            j (list x0)
-            (cps:let name x0 (cps-tail body k))
+            j (list name)
+            (cps-tail body k)
             (cps-tail init j)))
-      ;; (clexp:let name init body)
-      ;; -> (let ((j (gencont)))
-      ;;      (cps:letcont j name (cps-tail body k) (cps-tail init j)))
       (clexp:if test con ant)
       -> (let ((x1 (genvar))
                (x2 (genvar))
                (k1 (gencont))
                (k2 (gencont)))
-           (^bogus
+           (cps
             test
             (lambda (z)
              (cps:letcont
@@ -224,25 +201,23 @@
               (cps:letcont
                k2 (list x2) (cps-tail ant k)
                (cps:if z k1 k2))))))
-      (clexp:loop k0 x init body)
-      -> (let ((x0 (genvar)))
-           (cps:letcont
-            k0 (list x0)
-            (cps:let x x0 (cps-tail body k))
-            (cps-tail init k0)))
-      (clexp:appk k val)
-      -> (cps-args (list val) '() (lambda (vars) (cps:appk k vars)))
+      (clexp:loop k0 binds body)
+      -> (let (((vars inits) (zip binds)))
+           (cps-args
+            inits '()
+            (lambda (vars0)
+              (cps:letcont
+               k0 vars
+               (cps-tail body k)
+               (cps:appk k0 vars0)))))
+      (clexp:appk k vals)
+      -> (cps-args vals '() (lambda (vars) (cps:appk k vars)))
       ;; XXX probably not
       (clexp:set name exp)
       -> (raise (:DeadTail))
       x
       -> (raise (:NotYet x))
       ))
-
-  ;; this is to work around a serious (but VERY RARE) problem with
-  ;;   recursive calls.
-  (define (^bogus exp K)
-    (cps exp K))
 
   (cps-tail exp 'halt)
 

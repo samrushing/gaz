@@ -1,6 +1,17 @@
+;; -*- Mode: Irken -*-
+
 ;; --------------------------------------------------------------------------------
 ;; sample direct LLVM output.
 ;; --------------------------------------------------------------------------------
+
+(defmacro for-list-counting
+  (for-list-counting iname vname list body ...)
+  -> (let $loop (($list list)
+                 (iname 0))
+       (match $list with
+	 () -> #u
+	 (vname . $tl) -> (begin body ... ($loop $tl (+ iname 1)))
+	 )))
 
 ;; for this test I'm just going to emit text.
 (define (cpsfun->llvm name args exp)
@@ -16,28 +27,26 @@
 
     (define (pass1 exp blockname)
       (match exp with
-        (cps:let name x K)       -> (pass1 K blockname)
-        (cps:ref name x K)       -> (pass1 K blockname)
-        (cps:set name x K)       -> (pass1 K blockname)
         (cps:letval x V K)       -> (begin (alist/push venv x V) (pass1 K blockname))
-        (cps:letcont k x K L)    -> (begin (pass1 L blockname) (pass1 K k))
+        (cps:letcont k xs K L)   -> (begin (pass1 L blockname) (pass1 K k))
         (cps:if x k1 k2)         -> #u
-        (cps:appk k x)           -> (alist/push phimap k (:tuple x blockname))
+        (cps:appk k xs)          -> (for-list-counting i x xs
+                                       (alist/push phimap (:tuple k i) (:tuple x blockname)))
         (cps:dead K)             -> (pass1 K blockname)
         (cps:prim name x vars K) -> (pass1 K blockname)
         (cps:app name k vars)    -> #u
         ))
 
-    (define (emit-phi blockname x)
+    (define (emit-phi blockname x idx)
       (let loop ((acc (list:nil))
                  (phimap phimap))
         (match phimap with
           (alist:nil)
           -> (if (> (length acc) 0)
                  (printf "  %" (sym x) " = phi i64 [ " (join " ], [ " acc) " ]\n"))
-          (alist:entry ktrg (:tuple x ksrc) rest)
-          -> (if (eq? ktrg blockname)
-                 (loop (list:cons (format (valref x) ", %" (sym ksrc)) acc) rest)
+          (alist:entry (:tuple ktrg idx0) (:tuple x0 ksrc) rest)
+          -> (if (and (eq? ktrg blockname) (= idx idx0))
+                 (loop (list:cons (format (valref x0) ", %" (sym ksrc)) acc) rest)
                  (loop acc rest))
           )))
 
@@ -49,35 +58,23 @@
 
     (define (emit exp blockname)
       (match exp with
-        (cps:let name x K)
-        -> (begin
-             (printf "  %u" (sym name) " = alloca i64\n")
-             (printf "  store i64 " (valref x) ", i64* %u" (sym name) "\n")
-             (emit K blockname))
-        (cps:ref name x K)
-        -> (begin
-             (printf "  %" (sym x) " = load i64, i64* %u" (sym name) "\n")
-             (emit K blockname))
-        (cps:set name x K)
-        -> (begin
-             (printf "  store i64 " (valref x) ", i64* %u" (sym name) "\n")
-             (emit K blockname))
         (cps:letval x V K)
         -> (emit K blockname)
-        (cps:letcont k x K L)
+        (cps:letcont k xs K L)
         -> (begin
              (emit L blockname)
              ;; note: L is the init, and is in the current block
              (printf "\n" (sym k) ":\n") ;; label
-             (emit-phi k x)              ;; [ %x4, %block ]
-             (emit K k)                  ;; with new blockname
+             (for-list-counting i x xs
+                (emit-phi k x i))
+             (emit K k) ;; with new blockname
              )
         (cps:if x k1 k2)
         -> (let ((r (gensym)))
              (printf "  %" (sym r) " = icmp ne i64 " (valref x) ", 0\n")
              (printf "  switch i1 %" (sym r) ", label %" (sym k1) " [i1 0, label %" (sym k2) "]\n"))
-        (cps:appk k x)
-        -> (branch k x blockname)
+        (cps:appk k xs)
+        -> (branch k xs blockname)
         (cps:dead K)
         -> (emit K blockname)
         (cps:prim name x vars K)
@@ -89,15 +86,14 @@
              (printf "  %" (sym r) " = call i64 @" (sym name) " ("
                      (join (lambda (x) (format "i64 " (valref x))) ", " vars)
                      ")\n")
-             (branch k r blockname))
+             (branch k (list r) blockname))
         )
       )
 
-    ;; phimap must be done in a separate pass.
-
-    (define (branch k x blockname)
+    (define (branch k xs blockname)
+      ;; XXX what if |xs| > 1 ?
       (match k with
-        'halt -> (printf "  ret i64 " (valref x) "\n")
+        'halt -> (printf "  ret i64 " (valref (first xs)) "\n")
         k     -> (printf "  br label %" (sym k) "\n")
         ))
 
@@ -132,7 +128,7 @@
           (maybe:yes code)
           -> (let ((r (gensym)))
                (printf "  %" (sym r) " = icmp " code " i64 " (join ", " args) "\n")
-               (printf "  %" (sym x) " = zext i1 %r" (sym r) " to i64\n"))
+               (printf "  %" (sym x) " = zext i1 %" (sym r) " to i64\n"))
           (maybe:no)
           -> (match (alist/lookup binop-alist name) with
                (maybe:yes op)
@@ -142,7 +138,7 @@
                ))))
 
     (printf "define i64 @" (sym name) "("
-            (join (lambda (x) (format "i64 %u" (sym x))) ", " args)
+            (join (lambda (x) (format "i64 %" (sym x))) ", " args)
             ") {\n")
     (printf "top:\n")
     (pass1 exp 'top)

@@ -10,7 +10,8 @@
 
 (define (rewrite-cps exp)
 
-  (let ((census (tree/empty)))
+  (let ((census (tree/empty))
+        (nopt 0))
 
     (define (increment-census key)
       (match (tree/member census symbol-index-cmp key) with
@@ -25,9 +26,6 @@
 	))
 
     (define take-census
-      (cps:let n x t)          -> (begin (increment-census x) (take-census t))
-      (cps:ref n x t)          -> (begin (increment-census x) (take-census t))
-      (cps:set n x t)          -> (begin (increment-census x) (take-census t))
       (cps:letval x v t)       -> (take-census t)
       (cps:letcont k xs t0 t1) -> (begin (take-census t0) (take-census t1))
       (cps:appk k xs)          -> (begin (increment-census k)
@@ -73,17 +71,12 @@
 
       (define (N s e)
 	;; notify that a pass has a hit
+        (inc! nopt)
 	(printf (sym s) " " (cps-repr K) "\n")
 	(printf "  : " (cps-repr e) "\n")
 	e)
 
       (match K with
-        (cps:let name x K)
-        -> (cps:let name (apply-subst S x) (simp env S K))
-        (cps:ref name x K)
-        -> (cps:ref name (apply-subst S x) (simp env S K))
-        (cps:set name x K)
-        -> (cps:set name (apply-subst S x) (simp env S K))
         ;; ETA-CONT
         (cps:letcont k xs0 (cps:appk j xs1) K)
         -> (let ((j2 (apply-subst S j)))
@@ -131,6 +124,7 @@
       )
     (let loop ((n 5)
 	       (exp exp))
+      (set! nopt 0)
       (set! census (tree/empty))
       (take-census exp)
       (tree/inorder
@@ -138,7 +132,7 @@
          (printf (lpad 15 (symbol->string k)) " : " (lpad 5 (int v.count)) "\n"))
        census)
       (printf (int n) " " (cps-repr exp) "\n")
-      (if (= n 0)
+      (if (or (= nopt 0) (= n 0))
 	  exp
 	  (loop (- n 1) (simp (alist:nil) (tree/empty) exp))))
     )

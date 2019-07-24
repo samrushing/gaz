@@ -4,7 +4,7 @@
 (require "lib/partial.scm")
 (require "./cps.scm")
 (require "./rewrite.scm")
-;(require "./cps2llvm.scm")
+(require "./cps2llvm.scm")
 
 ;; ---- datatypes ----
 
@@ -17,9 +17,9 @@
   (:set symbol clexp)              ;; name value
   (:if clexp clexp clexp)          ;; test con ant
   (:call symbol (list clexp))      ;; name args
-  (:loop symbol                    ;; name
-         (list (:tuple var clexp)) ;; bindings
-         clexp)                    ;; body
+  (:loop symbol                    ;; loopname,
+         (list (:tuple symbol clexp)) ;; inits,
+         clexp)                       ;; body
   (:appk symbol (list clexp))      ;; kname arg
   )
 
@@ -74,8 +74,10 @@
                                                                (p-exp con)
                                                                (p-exp ant))
     ((sexp:symbol 'let) (sexp:list binds)  . body) -> (p-let-bindings (p-body '() body) binds)
-    ((sexp:symbol 'appk) (sexp:symbol k) . args)   -> (clexp:appk kname (map p-exp args))
-    ((sexp:symbol 'loop) (sexp:list binds) . body) -> (clexp:loop kname
+    ((sexp:symbol 'appk) (sexp:symbol k) . args)   -> (clexp:appk k (map p-exp args))
+    ((sexp:symbol 'let)
+     (sexp:symbol loopname)
+     (sexp:list binds) . body)                     -> (clexp:loop loopname
                                                                   (map p-binding binds)
                                                                   (p-body '() body))
     ((sexp:symbol fun) . args)                     -> (clexp:call fun (map p-exp args))
@@ -137,7 +139,8 @@
     (match binds with
       () -> (:tuple (reverse acc) env)
       ((:tuple v i) . tl)
-      -> (R-binds (extend env v) (list:cons (R env i) acc) tl)
+      -> (let (((v0 env0) (extend env v)))
+           (R-binds env0 (list:cons (:tuple v0 (R env i)) acc) tl))
       ))
 
   (define R
@@ -151,7 +154,7 @@
     env (clexp:if t c a)       -> (clexp:if (R env t) (R env c) (R env a))
     env (clexp:call name args) -> (clexp:call name (map (partial (R env _)) args))
     env (clexp:loop k binds b) -> (let (((k0 env0) (extend env k))
-                                        ((binds0 env1) (R-binds env0 (list:nil) env0)))
+                                        ((binds0 env1) (R-binds env0 (list:nil) binds)))
                                     (clexp:loop k0 binds0 (R env1 b)))
     env (clexp:appk k args)    -> (clexp:appk (lookup env k) (map (partial (R env _)) args))
     )
@@ -236,7 +239,7 @@
              ;; (printf "\n")
              ;; (cps->llvm cps0)
              (printf "\n")
-             ;;(cpsfun->llvm name args cps0)
+             (cpsfun->llvm name args cps1)
              )))))
 
 (main)
