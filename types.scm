@@ -38,3 +38,8 @@
   x -> (raise (:ParseVtypeFailed x))
   )
 
+;; let's use integer tvars, and solve for types using
+;;   a simple unifier.
+
+(typealias tvar int)
+

@@ -4,7 +4,7 @@
 (require "lib/partial.scm")
 (require "./read.scm")
 (require "./types.scm")
-;(require "./cps.scm")
+(require "./cps.scm")
 ;(require "./rewrite.scm")
 ;(require "./cps2llvm.scm")
 
@@ -257,8 +257,11 @@
       (pp0 (clfun->sexp fun) 80 0 "")
       (match fun with
         (clfun:t name args exp0)
-        -> (let ((exp1 (alpha exp0 args)))
-             (pp0 (clexp->sexp exp1) 80 0 "; ")))
+        -> (let ((exp1 (alpha exp0 args))
+                 (cps0 (clexp->cps exp1)))
+             (pp0 (clexp->sexp exp1) 80 0 "; ")
+             (pp0 (cps->sexp cps0) 80 0 "; ")
+             ))
         ;; -> (let ((exp1 (alpha exp0 args))
         ;;          (cps0 (clexp->cps exp1))
         ;;          (cps1 (rewrite-cps cps0)))

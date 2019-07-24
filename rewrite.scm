@@ -26,20 +26,20 @@
 	))
 
     (define take-census
-      (cps:letval x v t)       -> (take-census t)
-      (cps:letcont k xs t0 t1) -> (begin (take-census t0) (take-census t1))
-      (cps:appk k xs)          -> (begin (increment-census k)
-                                         (for-each increment-census xs))
-      (cps:app f k args)       -> (begin (increment-census f)
-                                         (increment-census k)
-                                         (for-each increment-census args))
-      (cps:prim n x args t)    -> (begin (increment-census x)
-                                         (for-each increment-census args)
-                                         (take-census t))
-      (cps:if x k0 k1)         -> (begin (increment-census x)
-                                         (increment-census k0)
-                                         (increment-census k1))
-      (cps:dead K)             -> (take-census K)
+      (cps:letval _ x v t)       -> (take-census t)
+      (cps:letcont _ k xs t0 t1) -> (begin (take-census t0) (take-census t1))
+      (cps:appk _ k xs)          -> (begin (increment-census k)
+                                           (for-each increment-census xs))
+      (cps:app _ f k args)       -> (begin (increment-census f)
+                                           (increment-census k)
+                                           (for-each increment-census args))
+      (cps:prim _ n x args t)    -> (begin (increment-census x)
+                                           (for-each increment-census args)
+                                           (take-census t))
+      (cps:if _ x k0 k1)         -> (begin (increment-census x)
+                                           (increment-census k0)
+                                           (increment-census k1))
+      (cps:dead _ K)             -> (take-census K)
       )
 
     (define (apply-subst S x)
@@ -78,45 +78,45 @@
 
       (match K with
         ;; ETA-CONT
-        (cps:letcont k xs0 (cps:appk j xs1) K)
+        (cps:letcont t0 k xs0 (cps:appk t1 j xs1) K)
         -> (let ((j2 (apply-subst S j)))
              (if (vars-eq? xs0 xs1)
                  (N 'eta-cont (simp env (extend-subst S k j2) K))
                  (cps:letcont
-                  k (map (lambda (y) (apply-subst S y)) xs1)
-                  (cps:appk j2 xs1) (simp env S K))))
+                  t0 k (map (lambda (y) (apply-subst S y)) xs1)
+                  (cps:appk t1 j2 xs1) (simp env S K))))
 	;; DEAD-VAL
-	(cps:letval x V L)
+	(cps:letval t0 x V L)
 	-> (if (= (census/get x) 0) ;;; XXXXX disabled by use of '<'
 	       (N 'dead-val (simp env S L))
 	       (let ((x0 (apply-subst S x)))
-		 (cps:letval x0 V (simp (alist:entry x0 (thing:val V) env) S L))))
+		 (cps:letval t0 x0 V (simp (alist:entry x0 (thing:val V) env) S L))))
 	;; DEAD-CONT
 	;; XXX I think the paper gets this confusingly wrong...
-	(cps:letcont k xs K L)
+	(cps:letcont t0 k xs K L)
         -> (let ((k0 (apply-subst S k))
                  (xs0 (map (lambda (y) (apply-subst S y)) xs)))
 	     (if (= 0 (census/get k0))
 	         (N 'dead-cont (simp env S L) )
 	         (cps:letcont
-                  k0 xs0
+                  t0 k0 xs0
 		  (simp env S K)
 		  (simp (alist:entry k0 (thing:cont xs0 K) env) S L)
 		  )))
 	;; BETA-CONT
-	(cps:appk k ys)
+	(cps:appk t0 k ys)
 	-> (let ((k0 (apply-subst S k))
 		 (ys0 (map (lambda (x) (apply-subst S x)) ys)))
              (if (= 1 (census/get k0))
                  (match (alist/lookup env k0) with
                    (maybe:yes (thing:cont xs K0))
 		   -> (N 'beta-cont (simp env (extend-subst* S xs ys0) K0))
-                   _ -> (cps:appk k0 ys0)
+                   _ -> (cps:appk t0 k0 ys0)
 		   )
-                 (cps:appk k0 ys0)
+                 (cps:appk t0 k0 ys0)
 		 ))
-        (cps:dead K)
-        -> (cps:dead (simp env S K))
+        (cps:dead t0 K)
+        -> (cps:dead t0 (simp env S K))
         ;; all others
          _
          -> K

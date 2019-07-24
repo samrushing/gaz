@@ -21,32 +21,53 @@
 
 (typealias var symbol)
 (typealias cvar symbol)
+
+;; this will become vtype, and we'll probably have to have a way of defining
+;;  literals.
 (typealias val int)
 
+;; now, how do we add types?  in irken we added types to the node
+;;  record, but I don't think we want that here. we either want:
+;; 1) add a type field to every record
+;;   pro: straightforward
+;;   con: tedious
+;;   con: no way to have a partially typed expression.
+;;      [unless we either create an 'unknown' type or type during cps conversion]
+;;   1a) make the type slot mutable?
+;; 2) wrap `cps` with a `tcps` tuple that includes a type.
+;;   pro: perhaps simpler?
+;;   con: may hurt embedded pattern matches.
+;;   con: breaks the datatype recursion.
+
+;; I'm leaning toward 1), with typing during cps conversion.
+;; in fact, the more I think about it, using tvars etc is probably
+;; the way to go, even if we're not doing full type inference (yet).
+
 (datatype cps
-  (:prim symbol var (list var) cps)  ;; x + y
-  (:letval var val cps)              ;; letval x = V in L
-  (:letcont cvar (list var) cps cps) ;; letcont k x0 x1 ... = K in L
-  (:appk cvar (list var))            ;; k x0 x1 ...
-  (:app symbol cvar (list var))      ;; f k x0 x1 ...
-  (:if var cvar cvar)                ;; if x k1 k2
-  (:dead cps)                        ;; K (for seq)
+  (:prim tvar symbol var (list var) cps)  ;; x + y
+  (:letval tvar var val cps)              ;; letval x = V in L
+  (:letcont tvar cvar (list var) cps cps) ;; letcont k x0 x1 ... = K in L
+  (:appk tvar cvar (list var))            ;; k x0 x1 ...
+  (:app tvar symbol cvar (list var))      ;; f k x0 x1 ...
+  (:if tvar var cvar cvar)                ;; if x k1 k2
+  (:dead tvar cps)                        ;; K (for seq)
   )
 
+;; note: ignores tvar.
 (define cps->sexp
-  (cps:prim n x vars k)    -> (sexp (sym 'prim) (sym n) (sym x)
-                                    (list (map sexp:symbol vars))
-                                    (cps->sexp k))
-  (cps:letval x v k)       -> (sexp (sym 'letval) (sym x) (int v) (cps->sexp k))
-  (cps:letcont k xs t0 t1) -> (sexp (sym 'letcont) (sym k)
-                                    (list (map sexp:symbol xs))
-                                    (cps->sexp t0) (cps->sexp t1))
-  (cps:appk k xs)          -> (sexp (sym 'appk) (sym k)
-                                    (list (map sexp:symbol xs)))
-  (cps:app n k vars)       -> (sexp (sym 'app) (sym n) (sym k)
-                                    (list (map sexp:symbol vars)))
-  (cps:if t c a)           -> (sexp (sym 'if) (sym t) (sym c) (sym a))
-  (cps:dead k)             -> (sexp (sym 'dead) (cps->sexp k))
+  (cps:prim t n x vars k)    -> (sexp (sym 'prim) (sym n) (sym x)
+                                      (list (map sexp:symbol vars))
+                                      (cps->sexp k))
+  (cps:letval t x v k)       -> (sexp (sym 'letval) (sym x) (int v) (cps->sexp k))
+  (cps:letcont t k xs t0 t1) -> (sexp (sym 'letcont) (sym k)
+                                      (list (map sexp:symbol xs))
+                                      (cps->sexp t0) (cps->sexp t1))
+  (cps:appk t k xs)          -> (sexp (sym 'appk) (sym k)
+                                      (list (map sexp:symbol xs)))
+  (cps:app t n k vars)       -> (sexp (sym 'app) (sym n) (sym k)
+                                      (list (map sexp:symbol vars)))
+  (cps:if t tst c a)         -> (sexp (sym 'if) (sym tst) (sym c) (sym a))
+  (cps:dead t k)             -> (sexp (sym 'dead) (cps->sexp k))
   )
 
 (define prims (list '+ '- '* '/ 'and 'or 'xor '<< '>> 'ashr '= '<> '< '> '<= '>=))
@@ -57,6 +78,12 @@
 
 (define (clexp->cps exp)
 
+  (define make-tvar
+    (let ((counter 0))
+      (lambda ()
+        (inc! counter)
+        counter)))
+
   (define (gensym prefix)
     (let ((counter 0))
       (lambda ()
@@ -65,6 +92,16 @@
 
   (define genvar (gensym "x"))
   (define gencont (gensym "L"))
+
+  ;; constructors that add a new tvar to every cps.
+  (define (cps-prim n x vars k)    (cps:prim (make-tvar) n x vars k))
+  (define (cps-letval x v k)       (cps:letval (make-tvar) x v k))
+  (define (cps-letcont k xs t0 t1) (cps:letcont (make-tvar) k xs t0 t1))
+  (define (cps-appk k xs)          (cps:appk (make-tvar) k xs))
+  (define (cps-app n k vars)       (cps:app (make-tvar) n k vars))
+  (define (cps-if tst con ant)     (cps:if (make-tvar) tst con ant))
+  (define (cps-dead k)             (cps:dead (make-tvar) k))
+
 
   (define (cps-args args vars K)
     (match args with
@@ -84,7 +121,7 @@
     (match exp with
       (clexp:lit n)
       -> (let ((x (genvar)))
-           (cps:letval x n (K x)))
+           (cps-letval x n (K x)))
       (clexp:ref s)
       -> (K s)
       (clexp:set name exp)
@@ -95,19 +132,22 @@
            (cps-args args '()
              (if (member-eq? name prims)
                  (lambda (vars)
-                   (cps:prim name x vars (K x)))
+                   (cps-prim name x vars (K x)))
                  (lambda (vars)
-                   (cps:letcont k (list x) (K x) (cps:app name k vars))))))
+                   (cps-letcont
+                    k (list x) (K x)
+                    (cps-app name k vars))))))
       (clexp:seq exps)
       -> (let loop ((exps exps))
            (match exps with
              ()        -> (raise (:EmptySequence))
              (one)     -> (cps one K)
-             (hd . tl) -> (cps hd (lambda (x1) (cps:dead (loop tl))))
+             (hd . tl) -> (cps hd (lambda (x1) (cps-dead (loop tl))))
              ))
-      (clexp:let name init body)
+      (clexp:let name type init body)
       -> (let ((j (gencont)))
-           (cps:letcont
+           ;; XXX record type here
+           (cps-letcont
             j (list name)
             (cps body K)
             (cps-tail init j)))
@@ -121,25 +161,27 @@
            (cps
             test
             (lambda (z)
-              (cps:letcont
+              (cps-letcont
                j (list x) (K x)
-               (cps:letcont
+               (cps-letcont
                 k1 (list x1) (cps-tail con j)
-                (cps:letcont
+                (cps-letcont
                  k2 (list x2) (cps-tail ant j)
-                 (cps:if z k1 k2))))))
+                 (cps-if z k1 k2))))))
            )
       (clexp:loop k binds body)
-      -> (let (((vars inits) (zip binds))
+      -> (let (((vars0 inits) (zip binds))
+               ((vars1 types) (zip vars0))
                (k0 (gencont))
                (x0 (genvar)))
+           ;; XXX record var types
            (cps-args
             inits '()
-            (lambda (vars0)
-              (cps:letcont
-               k vars
+            (lambda (vars2)
+              (cps-letcont
+               k vars2
                (cps-tail body k)
-               (cps:letcont k0 (list x0) (K x0) (cps:appk k vars0))))))
+               (cps-letcont k0 (list x0) (K x0) (cps-appk k vars1))))))
       (clexp:appk k xs)
       -> (raise (:NonTailAppK))
       x
@@ -152,15 +194,15 @@
     (match exp with
       (clexp:lit n)
       -> (let ((x (genvar)))
-           (cps:letval x n (cps:appk k (list x))))
+           (cps-letval x n (cps-appk k (list x))))
       (clexp:ref s)
-      -> (cps:appk k (list s))
+      -> (cps-appk k (list s))
       (clexp:seq exps)
       -> (let loop ((exps exps))
            (match exps with
              ()           -> (raise (:EmptySequence))
              (exp)        -> (cps-tail exp k)
-             (exp . exps) -> (cps exp (lambda (x1) (cps:dead (loop exps))))
+             (exp . exps) -> (cps exp (lambda (x1) (cps-dead (loop exps))))
              ))
       (clexp:call name args)
       -> (cps-args
@@ -168,11 +210,12 @@
           (if (member-eq? name prims)
               (lambda (vars)
                 (let ((x (genvar)))
-                  (cps:prim name x vars (cps:appk k (list x)))))
-              (lambda (vars) (cps:app name k vars))))
-      (clexp:let name init body)
+                  (cps-prim name x vars (cps-appk k (list x)))))
+              (lambda (vars) (cps-app name k vars))))
+      (clexp:let name type init body)
       -> (let ((j (gencont)))
-           (cps:letcont
+           ;; XXX record type here
+           (cps-letcont
             j (list name)
             (cps-tail body k)
             (cps-tail init j)))
@@ -184,22 +227,24 @@
            (cps
             test
             (lambda (z)
-             (cps:letcont
+             (cps-letcont
               k1 (list x1) (cps-tail con k)
-              (cps:letcont
+              (cps-letcont
                k2 (list x2) (cps-tail ant k)
-               (cps:if z k1 k2))))))
+               (cps-if z k1 k2))))))
       (clexp:loop k0 binds body)
-      -> (let (((vars inits) (zip binds)))
+      -> (let (((vars0 inits) (zip binds))
+               ((vars1 types) (zip vars0)))
+           ;; XXX record types
            (cps-args
             inits '()
-            (lambda (vars0)
-              (cps:letcont
-               k0 vars
+            (lambda (vars2)
+              (cps-letcont
+               k0 vars2
                (cps-tail body k)
-               (cps:appk k0 vars0)))))
+               (cps-appk k0 vars1)))))
       (clexp:appk k vals)
-      -> (cps-args vals '() (lambda (vars) (cps:appk k vars)))
+      -> (cps-args vals '() (lambda (vars) (cps-appk k vars)))
       ;; XXX probably not
       (clexp:set name exp)
       -> (raise (:DeadTail))
