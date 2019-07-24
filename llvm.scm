@@ -3,6 +3,9 @@
 ;; the goal here is to begin writing a new language, specifically
 ;; meant for generating fast, constant-time code for cryptography.
 
+;; XXX if we mean to use this as a target lang, we'll need to add
+;;     support for phi insns.
+
 (datatype llt
   (:void)
   (:int int) ;; width in bits.
