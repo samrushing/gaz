@@ -7,7 +7,7 @@
 
   (let ((char #\eof) ;; one-character buffer
 	(line 0)
-	(pos 0)
+	(pos -1)
         (spath (sexp:string path))
         (%ann (sexp:symbol '%ann))
         (src (sexp:symbol 'src))
@@ -108,7 +108,6 @@
 	))
 
     (define (read1)
-      (skip-whitespace)
       (let ((ch (peek)))
 	(match ch with
 	  #\eof -> (ERR "unexpected end of file")
@@ -176,6 +175,10 @@
 	    #\: -> (begin
 		     (next)
 		     (match result (read) with
+                       ;; NOTE: with annotation turned on, these cases are NOT caught.
+                       ;;   which is probably fine, since if you are using annotation
+                       ;;   you're probably not the Irken compiler.
+                       ;;
                        ;; normal constructor syntax
 		       (sexp:symbol dt) (sexp:symbol alt) -> (sexp:cons dt alt)
                        ;; object/method syntax (ob::add arg0 ...)
@@ -312,6 +315,7 @@
             ch  -> (if neg? (- 0 r) r)))))
 
     (define (read)
+      (skip-whitespace)
       (let ((line0 line)
             (pos0 pos)
             (result (read-postfix)))
@@ -339,4 +343,31 @@
     )
   (define RAf (field:t name e) -> (field:t name (RA e)))
   (RA exp)
+  )
+
+;; ---- modified pprint ----
+
+(define (pp0 exp width depth prefix)
+  (define (recur d exp)
+    (let ((size (pp-size exp)))
+      (if (< size width)
+	  (printf (repr exp))
+	  (match exp with
+	    (sexp:list ())
+	    -> (printf "()")
+	    (sexp:list (hd . tl))
+	    -> (begin (printf "(")
+		      (recur d hd)
+		      (for-each
+		       (lambda (x)
+			 (newline)
+                         (printf prefix)
+			 (indent (+ d 1))
+			 (recur (+ d 1) x)) tl)
+		      (printf ")"))
+	    ;; XXX complete for vector & record.
+	    _ -> (printf (repr exp))))))
+  (printf prefix)
+  (recur depth exp)
+  (print-string "\n")
   )
