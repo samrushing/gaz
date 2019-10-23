@@ -9,6 +9,8 @@
 ;; by Kohlbecker and Wand, popl-87.
 ;; https://doi.org/10.1145/41625.41632
 
+(require "lib/basis.scm")
+(require "./read.scm")
 (require "lib/partial.scm")
 
 ;; this code is derived directly from "Section 3: Semantics"
@@ -319,11 +321,11 @@
 ;; (test-C "(thing x ...)")
 ;; (test-C "(foo ((x  y) ...) ...)")
 
-(test-B "(thing a b c) (thing 1 2 3)")
-(test-B "(thing x ...) (thing 1 2 3)")
+;; (test-B "(thing a b c) (thing 1 2 3)")
+;; (test-B "(thing x ...) (thing 1 2 3)")
 
-(test-B "(<thing> a b c) (thing 1 2 3)")
-(test-B "(<thing> x ...) (thing 1 2 3)")
+;; (test-B "(<thing> a b c) (thing 1 2 3)")
+;; (test-B "(<thing> x ...) (thing 1 2 3)")
 
 ;; (test-D "(thing ((x y) ...) ...) (thing ((1 2) (3 4)) ((5 6) (7 8)))")
 
