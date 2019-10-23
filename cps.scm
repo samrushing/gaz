@@ -1,24 +1,5 @@
 ;; -*- Mode: Irken -*-
 
-;; TODO
-;; * consider making clexp:let n-ary rather than devolving it into let*.
-;; * add types
-;;   we need to extend the universe of values.
-;;   previously we had `cons` & `int`.  for crypto we want
-;;     the T=i<n>|<vector T> typeset.  we also probably need
-;;     a separate `ref` type.  But what can it contain?
-;;    [or yet, like in smlnj is a ref type equiv to a length-one vector?]
-;;   ok, I've added typed variable bindings (in define, let, and let-loop).
-;;   the next step is to infer/propagate all types.
-;;
-;; * convert var/cvar to int
-;;   (this turned out to be a Bad Idea - rewrite all hosed because no distinction)
-;;   might want to explore this again later using a real datatype for the various
-;;   var types.
-;; * add functions (maybe?)
-;;   Thought I needed functions for loops, but if instead I expose 'appk' to the user
-;;     we can implement loops/recursion directly with conts.  I think.
-
 (typealias var symbol)
 (typealias cvar symbol)
 
@@ -178,9 +159,9 @@
             inits '()
             (lambda (vars2)
               (cps-letcont
-               k vars2
+               k vars1
                (cps-tail body k)
-               (cps-letcont k0 (list x0) (K x0) (cps-appk k vars1))))))
+               (cps-letcont k0 (list x0) (K x0) (cps-appk k vars2))))))
       (clexp:appk k xs)
       -> (raise (:NonTailAppK))
       x
@@ -237,9 +218,9 @@
             inits '()
             (lambda (vars2)
               (cps-letcont
-               k0 vars2
+               k0 vars1
                (cps-tail body k)
-               (cps-appk k0 vars1)))))
+               (cps-appk k0 vars2)))))
       (clexp:appk k vals)
       -> (cps-args vals '() (lambda (vars) (cps-appk k vars)))
       x
