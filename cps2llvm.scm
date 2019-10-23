@@ -27,14 +27,14 @@
 
     (define (pass1 exp blockname)
       (match exp with
-        (cps:letval tv x V K)       -> (begin (alist/push venv x V) (pass1 K blockname))
-        (cps:letcont tv k xs K L)   -> (begin (pass1 L blockname) (pass1 K k))
-        (cps:if tv x k1 k2)         -> #u
-        (cps:appk tv k xs)          -> (for-list-counting i x xs
-                                       (alist/push phimap (:tuple k i) (:tuple x blockname)))
-        (cps:dead tv K)             -> (pass1 K blockname)
-        (cps:prim tv name x vars K) -> (pass1 K blockname)
-        (cps:app tv name k vars)    -> #u
+        (cps:letval x ty V K)       -> (begin (alist/push venv x V) (pass1 K blockname))
+        (cps:letcont k ty xs K L)   -> (begin (pass1 L blockname) (pass1 K k))
+        (cps:if x k1 k2)            -> #u
+        (cps:appk k xs)             -> (for-list-counting i x xs
+                                         (alist/push phimap (:tuple k i) (:tuple x blockname)))
+        (cps:dead K)                -> (pass1 K blockname)
+        (cps:prim name x ty vars K) -> (pass1 K blockname)
+        (cps:app name k vars)       -> #u
         ))
 
     (define (emit-phi blockname x idx)
@@ -58,9 +58,9 @@
 
     (define (emit exp blockname)
       (match exp with
-        (cps:letval tv x V K)
+        (cps:letval x ty V K)
         -> (emit K blockname)
-        (cps:letcont tv k xs K L)
+        (cps:letcont k ty xs K L)
         -> (begin
              (emit L blockname)
              ;; note: L is the init, and is in the current block
@@ -69,19 +69,19 @@
                 (emit-phi k x i))
              (emit K k) ;; with new blockname
              )
-        (cps:if tv x k1 k2)
+        (cps:if x k1 k2)
         -> (let ((r (gensym)))
              (printf "  %" (sym r) " = icmp ne i64 " (valref x) ", 0\n")
              (printf "  switch i1 %" (sym r) ", label %" (sym k1) " [i1 0, label %" (sym k2) "]\n"))
-        (cps:appk tv k xs)
+        (cps:appk k xs)
         -> (branch k xs blockname)
-        (cps:dead tv K)
+        (cps:dead K)
         -> (emit K blockname)
-        (cps:prim tv name x vars K)
+        (cps:prim name x ty vars K)
         -> (begin
              (emit-prim name x vars)
              (emit K blockname))
-        (cps:app tv name k vars)
+        (cps:app name k vars)
         -> (let ((r (gensym)))
              (printf "  %" (sym r) " = call i64 @" (sym name) " ("
                      (join (lambda (x) (format "i64 " (valref x))) ", " vars)
