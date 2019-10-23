@@ -1,39 +1,31 @@
 ;; -*- Mode: Irken -*-
 
-(require "lib/basis.scm")
-(require "lib/partial.scm")
-(require "./read.scm")
-(require "./types.scm")
-(require "./cps.scm")
-(require "./rewrite.scm")
-;(require "./cps2llvm.scm")
-
 ;; ---- datatypes ----
 
 (datatype clexp
   (:lit int)                       ;; value
   (:prim symbol (list clexp))      ;; name args
   (:seq (list clexp))              ;; exp ...
-  (:let symbol vtype clexp clexp)  ;; name vtype init body
+  (:let symbol type clexp clexp)   ;; name type init body
   (:ref symbol)                    ;; name
   (:set symbol clexp)              ;; name value
   (:if clexp clexp clexp)          ;; test con alt
   (:call symbol (list clexp))      ;; name args
   (:loop symbol                    ;; loopname,
-         (list (:tuple (:tuple symbol vtype) clexp)) ;; inits,
+         (list (:tuple (:tuple symbol type) clexp)) ;; inits,
          clexp)                       ;; body
   (:appk symbol (list clexp))      ;; kname arg
   )
 
 (datatype clfun
-  (:t symbol (list (:tuple symbol vtype)) clexp)
+  (:t symbol (list (:tuple symbol type)) clexp)
   )
 
 ;; ---- unparse ----
 
 (define (clexp->sexp exp)
 
-  (define T vtype->sexp)
+  (define T type->sexp)
 
   (define B
     (:tuple (:tuple v t) i) -> (sexp (sym v) (T t) (E i))
@@ -55,7 +47,7 @@
   )
 
 (define typed-var->sexp
-  (:tuple vname vtype) -> (sexp (sym vname) (vtype->sexp vtype))
+  (:tuple vname type) -> (sexp (sym vname) (type->sexp type))
   )
 
 (define clfun->sexp
@@ -71,49 +63,48 @@
     ;; the irken reader will emit (sexp:cons 'x 'y) for `x:y`
     ;;   for constructors.  I'm not super happy with that and
     ;;   would prefer a (sexp:colon) as a generic infix expression.
-    (sexp:cons vname vtype)
-    -> (:tuple vname (parse-vtype (sexp:symbol vtype)))
-    (sexp:list ((sexp:symbol '%typed) (sexp:symbol vname) vtype))
-    -> (:tuple vname (parse-vtype vtype))
+    (asexp:cons vname type)
+    -> (:tuple vname (parse-type (asexp:symbol type)))
+    (asexp:list ((asexp:symbol '%typed) (asexp:symbol vname) type))
+    -> (:tuple vname (parse-type type))
     x -> (begin
            (printf "bad: " (sexp x) "\n")
-           (raise (:SyntaxError x)))
+           (raise (:SyntaxError 0 x)))
     )
 
   (define p-let-bindings
     body ()
     -> body
-    body ((sexp:list (var init)) . rest)
-    -> (let (((vname vtype) (p-typed-var var)))
-         (clexp:let vname vtype (p-exp init) (p-let-bindings body rest)))
+    body ((asexp:list (var init)) . rest)
+    -> (let (((vname type) (p-typed-var var)))
+         (clexp:let vname type (p-exp init) (p-let-bindings body rest)))
     body x
-    -> (raise (:SyntaxError (sexp:list x)))
+    -> (raise (:SyntaxError 1 (asexp:list x)))
     )
 
   (define p-binding
-    (sexp:list (var init)) -> (:tuple (p-typed-var var) (p-exp init))
-    x -> (raise (:SyntaxError x))
+    (asexp:list (var init)) -> (:tuple (p-typed-var var) (p-exp init))
+    x -> (raise (:SyntaxError 2 x))
     )
 
   (define p-exp-list
-    ((sexp:symbol 'begin) . rest)                  -> (clexp:seq (map p-exp rest))
-    ((sexp:symbol 'set!) (sexp:symbol name) val)   -> (clexp:set name (p-exp val))
-    ((sexp:symbol 'if) test con alt)               -> (clexp:if (p-exp test) (p-exp con) (p-exp alt))
-    ((sexp:symbol 'let) (sexp:list binds)  . body) -> (p-let-bindings (p-body '() body) binds)
-    ((sexp:symbol 'appk) (sexp:symbol k) . args)   -> (clexp:appk k (map p-exp args))
-    ((sexp:symbol 'let)
-     (sexp:symbol loopname)
-     (sexp:list binds) . body)                     -> (clexp:loop loopname
-                                                                  (map p-binding binds)
+    ((asexp:symbol 'begin) . rest)                  -> (clexp:seq (map p-exp rest))
+    ((asexp:symbol 'set!) (asexp:symbol name) val)   -> (clexp:set name (p-exp val))
+    ((asexp:symbol 'if) test con alt)               -> (clexp:if (p-exp test) (p-exp con) (p-exp alt))
+    ((asexp:symbol 'let) (asexp:list binds)  . body) -> (p-let-bindings (p-body '() body) (strip-ann1 binds))
+    ((asexp:symbol 'appk) (asexp:symbol k) . args)   -> (clexp:appk k (map p-exp args))
+    ((asexp:symbol 'let)
+     (asexp:symbol loopname)
+     (asexp:list binds) . body)                     -> (clexp:loop loopname
+                                                                  (map p-binding (strip-ann1 binds))
                                                                   (p-body '() body))
-    ((sexp:symbol fun) . args)                     -> (clexp:call fun (map p-exp args))
-    x                                              -> (raise (:SyntaxError (sexp:list x)))
+    ((asexp:symbol fun) . args)                     -> (clexp:call fun (map p-exp args))
+    x                                              -> (raise (:SyntaxError 3 (asexp:list x)))
     )
 
   (define p-formals
-    ;; XXX add types
-    acc ()                            -> (reverse acc)
-    acc (formal . rest)               -> (p-formals (list:cons (p-typed-var formal) acc) rest)
+    acc ()              -> (reverse acc)
+    acc (formal . rest) -> (p-formals (list:cons (p-typed-var formal) acc) rest)
     )
 
   (define p-body
@@ -123,23 +114,25 @@
     acc (exp . rest) -> (p-body (list:cons (p-exp exp) acc) rest)
     )
 
+  (define p-formals
+    ((asexp:symbol name) . formals) -> (:tuple name (map p-typed-var formals))
+    x -> (raise (:SyntaxError 4 (asexp:list x)))
+    )
+
   (define (parse exp)
     (match exp with
       ;; function definition
-      (sexp:list ((sexp:symbol 'define) (sexp:list ((sexp:symbol name) . formals)) . body))
+      (asexp:list ((asexp:symbol 'define) (asexp:list ((asexp:symbol name) . formals)) . body))
       -> (:fun (clfun:t name (p-formals '() formals) (p-body '() body)))
       (sexp:list ((sexp:symbol 'define) (sexp:symbol name) exp))
       ;; global variable definition
       -> (raise (:NotImplemented exp))
-      exp
-      -> (:exp (p-exp exp))
-      ))
 
   (define p-exp
     (sexp:int v)    -> (clexp:lit v)
     (sexp:symbol s) -> (clexp:ref s)
     (sexp:list vs)  -> (p-exp-list vs)
-    x               -> (raise (:SyntaxError x))
+    x               -> (raise (:SyntaxError 6 x))
     )
 
   (parse exp)
@@ -202,7 +195,7 @@
 
   (define initial-env
     acc ()        -> acc
-    acc ((:tuple vname vtype) . tl) -> (initial-env (alist:entry vname vname acc) tl)
+    acc ((:tuple vname type) . tl) -> (initial-env (alist:entry vname vname acc) tl)
     )
 
   ;; XXX this is where we lose all info about renamings!  in a real compiler we should
@@ -238,46 +231,3 @@
   (print-string "\n")
   )
 
-;; ---- file input ----
-
-(define (read-file path)
-  (let ((file (file/open-read path))
-	;;(result (reader path (lambda () (file/read-char file))))
-	(result (read2 path (lambda () (file/read-char file)) #f))
-        )
-    result))
-
-(define (main)
-  (let ((ipath sys.argv[1])
-        (forms (read-file ipath))
-        ((funs exps) (parse-toplevel forms)))
-    (when (> (length exps) 0)
-      (raise (:NoToplevelExps)))
-    (for-list fun funs
-      (pp0 (clfun->sexp fun) 80 0 "")
-      (match fun with
-        (clfun:t name args exp0)
-        -> (let ((exp1 (alpha exp0 args))
-                 (types (clexp->types exp1))
-                 (cps0 (clexp->cps exp1))
-                 (cps1 (rewrite-cps cps0)))
-             (dump-type-map types)
-             (pp0 (clexp->sexp exp1) 80 0 "; ")
-             (pp0 (cps->sexp cps0) 80 0 "; ")
-             (pp0 (cps->sexp cps1) 80 0 "; ")
-             ))
-        ;; -> (let ((exp1 (alpha exp0 args))
-        ;;          (cps0 (clexp->cps exp1))
-        ;;          (cps1 (rewrite-cps cps0)))
-        ;;      (pp0 (clexp->sexp exp0) 80 0 "; ")
-        ;;      ;; (pp0 (clexp->sexp exp1) 80 0 "; ")
-        ;;      (pp0 (cps->sexp cps0) 80 0 "; ")
-        ;;      (pp0 (cps->sexp cps1) 80 0 "; ")
-        ;;      ;; (printf "\n")
-        ;;      ;; (cps->llvm cps0)
-        ;;      (printf "\n")
-        ;;      (cpsfun->llvm name args cps1)
-        ;;      )
-      )))
-
-(main)
