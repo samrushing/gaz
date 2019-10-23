@@ -1,233 +1,457 @@
 ;; -*- Mode: Irken -*-
 
-;; ---- datatypes ----
+;; used to build useful labels for parser combinators.
+(define (wrap-label sym subs)
+  (sexp:list
+   (list:cons
+    (sexp:symbol sym)
+    (map (lambda (p) p.label) subs))))
 
-(datatype clexp
-  (:lit int)                       ;; value
-  (:prim symbol (list clexp))      ;; name args
-  (:seq (list clexp))              ;; exp ...
-  (:let symbol type clexp clexp)   ;; name type init body
-  (:ref symbol)                    ;; name
-  (:set symbol clexp)              ;; name value
-  (:if clexp clexp clexp)          ;; test con alt
-  (:call symbol (list clexp))      ;; name args
-  (:loop symbol                    ;; loopname,
-         (list (:tuple (:tuple symbol type) clexp)) ;; inits,
-         clexp)                       ;; body
-  (:appk symbol (list clexp))      ;; kname arg
+(define (src/if s0 s1)
+  (if (eq? s1 null-src) s0 s1))
+
+;; extract src annotation from an s-expression
+(define sexp->src
+  (sexp:list
+   ((sexp:symbol '%ann)
+    (sexp:list ((sexp:symbol 'src) (sexp:string path) (sexp:int line) (sexp:int pos)))
+    exp))
+  -> (:tuple {path=path line=line pos=pos} exp)
+  exp
+  -> (:tuple null-src exp)
   )
 
-(datatype clfun
-  (:t symbol (list (:tuple symbol type)) clexp)
+;; this parser expects/extracts annotation info and attaches
+;;   it to the result (whether positive or negative).
+(define (p-annotated p)
+  (define inner
+    ()
+    -> (result:no null-src p.label "no more input")
+    (hd . tl)
+    -> (match (sexp->src hd) with
+         (:tuple src exp)
+         -> (match (p.fun (list exp)) with
+              (result:ok src0 val _)
+              -> (result:ok (src/if src src0) val tl)
+              (result:no src0 label err)
+              -> (result:no (src/if src src0) label err)
+              (result:fail src0 label err)
+              -> (result:fail (src/if src src0) label err)
+              ))
+    )
+  (parser/make inner (sexp (sym 'ann) p.label))
   )
 
-;; ---- unparse ----
+;; like mapP, but passes the src location as an extra arg.
+(define (map-ann f parser)
+  (let ((label (sexp (sym 'm-ann) parser.label)))
+    (parser/make
+     (lambda (input)
+       (match (parser.fun input) with
+         (result:ok src v rest)
+         -> (result:ok src (f src v) rest)
+         (result:no src _ err)
+         -> (result:no src label err)
+         (result:fail src lab err)
+         -> (result:fail src lab err)
+         ))
+     label
+     )))
 
-(define (clexp->sexp exp)
+;; this is a datatype specifically to help our parser combinators
+;; [avoiding the use of polymorphic variants]
 
-  (define T type->sexp)
-
-  (define B
-    (:tuple (:tuple v t) i) -> (sexp (sym v) (T t) (E i))
-    )
-
-  (define E
-    (clexp:lit n)                -> (sexp (sym 'lit) (int n))
-    (clexp:prim name args)       -> (sexp (sym name) (list (map E args)))
-    (clexp:seq exps)             -> (sexp1 'seq (map E exps))
-    (clexp:let name t init body) -> (sexp (sym 'let) (sym name) (T t) (E init) (E body))
-    (clexp:ref name)             -> (sexp (sym 'ref) (sym name))
-    (clexp:set name val)         -> (sexp (sym 'set) (sym name) (E val))
-    (clexp:if t c a)             -> (sexp (sym 'if) (E t) (E c) (E a))
-    (clexp:call n args)          -> (sexp (sym 'call) (sym n) (list (map E args)))
-    (clexp:loop n binds b)       -> (sexp (sym 'let) (sym n) (list (map B binds)) (E b))
-    (clexp:appk n args)          -> (sexp (sym 'appk) (sym n) (list (map E args)))
-    )
-  (E exp)
+(datatype zparse
+  (:int int)
+  (:bool bool)
+  (:sym symbol)
+  (:lit sexp)
+  (:wild)
+  (:opt (maybe zparse))
+  (:list (list zparse))
+  (:exp azexp)
+  (:type type)
+  (:tname aztname)
   )
 
-(define typed-var->sexp
-  (:tuple vname type) -> (sexp (sym vname) (type->sexp type))
+(define (zp-star p) (mapP zparse:list (star p) 'star))
+(define (zp-plus p) (mapP zparse:list (plus p) 'plus))
+(define (zp-opt p) (mapP zparse:opt (opt p) 'opt))
+
+;; XXX should we have a `maybe` wrapper for these tests?
+(define qtest-int
+  (sexp:int n) -> (maybe:yes (zparse:int n))
+  _            -> (maybe:no)
   )
 
-(define clfun->sexp
-  (clfun:t name binds body)
-  -> (sexp (sym 'define) (sexp1 name (map typed-var->sexp binds))
-           (clexp->sexp body)))
-
-;; ---- parse ----
-
-(define (parse-clexp exp)
-
-  (define p-typed-var
-    ;; the irken reader will emit (sexp:cons 'x 'y) for `x:y`
-    ;;   for constructors.  I'm not super happy with that and
-    ;;   would prefer a (sexp:colon) as a generic infix expression.
-    (asexp:cons vname type)
-    -> (:tuple vname (parse-type (asexp:symbol type)))
-    (asexp:list ((asexp:symbol '%typed) (asexp:symbol vname) type))
-    -> (:tuple vname (parse-type type))
-    x -> (begin
-           (printf "bad: " (sexp x) "\n")
-           (raise (:SyntaxError 0 x)))
-    )
-
-  (define p-let-bindings
-    body ()
-    -> body
-    body ((asexp:list (var init)) . rest)
-    -> (let (((vname type) (p-typed-var var)))
-         (clexp:let vname type (p-exp init) (p-let-bindings body rest)))
-    body x
-    -> (raise (:SyntaxError 1 (asexp:list x)))
-    )
-
-  (define p-binding
-    (asexp:list (var init)) -> (:tuple (p-typed-var var) (p-exp init))
-    x -> (raise (:SyntaxError 2 x))
-    )
-
-  (define p-exp-list
-    ((asexp:symbol 'begin) . rest)                  -> (clexp:seq (map p-exp rest))
-    ((asexp:symbol 'set!) (asexp:symbol name) val)   -> (clexp:set name (p-exp val))
-    ((asexp:symbol 'if) test con alt)               -> (clexp:if (p-exp test) (p-exp con) (p-exp alt))
-    ((asexp:symbol 'let) (asexp:list binds)  . body) -> (p-let-bindings (p-body '() body) (strip-ann1 binds))
-    ((asexp:symbol 'appk) (asexp:symbol k) . args)   -> (clexp:appk k (map p-exp args))
-    ((asexp:symbol 'let)
-     (asexp:symbol loopname)
-     (asexp:list binds) . body)                     -> (clexp:loop loopname
-                                                                  (map p-binding (strip-ann1 binds))
-                                                                  (p-body '() body))
-    ((asexp:symbol fun) . args)                     -> (clexp:call fun (map p-exp args))
-    x                                              -> (raise (:SyntaxError 3 (asexp:list x)))
-    )
-
-  (define p-formals
-    acc ()              -> (reverse acc)
-    acc (formal . rest) -> (p-formals (list:cons (p-typed-var formal) acc) rest)
-    )
-
-  (define p-body
-    ()  ()           -> (raise (:EmptyBody))
-    (one) ()         -> one
-    acc ()           -> (clexp:seq (reverse acc))
-    acc (exp . rest) -> (p-body (list:cons (p-exp exp) acc) rest)
-    )
-
-  (define p-formals
-    ((asexp:symbol name) . formals) -> (:tuple name (map p-typed-var formals))
-    x -> (raise (:SyntaxError 4 (asexp:list x)))
-    )
-
-  (define (parse exp)
-    (match exp with
-      ;; function definition
-      (asexp:list ((asexp:symbol 'define) (asexp:list ((asexp:symbol name) . formals)) . body))
-      -> (:fun (clfun:t name (p-formals '() formals) (p-body '() body)))
-      (sexp:list ((sexp:symbol 'define) (sexp:symbol name) exp))
-      ;; global variable definition
-      -> (raise (:NotImplemented exp))
-
-  (define p-exp
-    (sexp:int v)    -> (clexp:lit v)
-    (sexp:symbol s) -> (clexp:ref s)
-    (sexp:list vs)  -> (p-exp-list vs)
-    x               -> (raise (:SyntaxError 6 x))
-    )
-
-  (parse exp)
+(define qtest-bool
+  (sexp:bool b) -> (maybe:yes (zparse:bool b))
+  _             -> (maybe:no)
   )
 
-(define (parse-toplevel forms)
-  (let ((exps (list:nil))
-        (funs (list:nil)))
-    (for-list form forms
-      (match (parse-clexp form) with
-        (:fun f) -> (push! funs f)
-        (:exp e) -> (push! exps e)
-        ))
-    (:tuple (reverse funs) (reverse exps))
+(define qtest-sym
+  (sexp:symbol s) -> (maybe:yes (zparse:sym s))
+  _               -> (maybe:no)
+  )
+
+;; any s-expression literal
+(define (qtest-lit lit)
+  (lambda (exp)
+    ;;(printf "sexp=? " (repr lit) " - " (repr exp) " " (bool (sexp=? exp lit)) "\n")
+    (if (sexp=? exp lit)
+        (maybe:yes (zparse:lit lit))
+        (maybe:no))))
+
+(define qtest-wild
+  exp -> (maybe:yes (zparse:wild exp))
+  )
+
+(define (q-satisfy tester label0)
+  (define label (sexp:symbol label0))
+  (define inner
+    ()
+    -> (result:no null-src label "no more input")
+    (exp . rest)
+    -> (match (tester exp) with
+         (maybe:yes v) -> (result:ok null-src v rest)
+         (maybe:no)    -> (result:no null-src label "unexpected expression type")
+         ))
+  (parser/make inner label)
+  )
+
+(define q-int (q-satisfy qtest-int 'int))
+(define qa-int (p-annotated q-int))
+(define q-bool (q-satisfy qtest-bool 'bool))
+(define qa-bool (p-annotated q-bool))
+(define (q-lit lit)
+  (let ((r (q-satisfy (qtest-lit lit) 'lit)))
+    (set! r.label (sexp (sym 'lit) lit))
+    r))
+(define (qa-lit lit) (p-annotated (q-lit lit)))
+(define (q-litsym s) (q-lit (sexp:symbol s)))
+(define (qa-litsym s) (p-annotated (q-litsym s)))
+(define q-sym (q-satisfy qtest-sym 'sym))
+(define qa-sym (p-annotated q-sym))
+(define q-wild (q-satisfy qtest-wild 'wild))
+(define qa-wild (p-annotated q-wild))
+
+;; ----- list of parsers -----
+
+(define p-seq*
+  ()        -> (returnP (list:nil) (sexp:symbol 'nil))
+  (hd . tl) -> (consP hd (p-seq* tl))
+  )
+
+(define (zp-list0 parsers)
+  (zp-list* (wrap-label 'list parsers) (p-seq* parsers)))
+
+(define (zp-list* label seq)
+  (define inner
+    ()
+    -> (result:no null-src label "empty list")
+    ((sexp:list subs) . rest)
+    -> (match (seq.fun subs) with
+         (result:ok src v ())
+         -> (result:ok src (zparse:list v) rest)
+         (result:ok src v (hd . tl))
+         -> (let (((src0 _) (sexp->src hd)))
+              (result:fail src0 label "unexpected item"))
+         (result:no src lab err)
+         -> (result:no src lab err)
+         (result:fail src lab err)
+         -> (result:fail src lab err)
+         )
+    (_ . rest)
+    -> (result:no null-src label "expected list")
+    )
+  (parser/make inner label)
+  )
+
+(defmacro zp-list
+  (zp-list p ...) -> (zp-list0 (list p ...))
+  )
+
+(defmacro za-list
+  (za-list p ...) -> (p-annotated (zp-list p ...))
+  )
+
+(define (p-form* sym parsers)
+  (zp-list*
+   (wrap-label sym parsers)
+   (consP (qa-litsym sym)
+          (must (p-seq* parsers))
+          )))
+
+(define (mp-form* sym fun parsers)
+  (mapP fun (p-form* sym parsers) sym))
+
+(defmacro mp-form
+  (mp-form sym fun p ...) -> (mp-form* sym fun (list p ...))
+  )
+
+(defmacro p-form
+  (p-form sym p ...) -> (p-form* sym (list p ...))
+  )
+
+(defmacro pa-form
+  (pa-form sym p ...) -> (p-annotated (p-form sym p ...))
+  )
+
+;; ----- parse-type -----
+
+(define int-type-alist
+  (alist/make
+   ('i1 i1)
+   ('i8 i8)
+   ('i16 i16)
+   ('i32 i32)
+   ('i64 i64)
+   ('i128 i128)
+   ('i256 i256)
+  ))
+
+(define qtest-int-type
+  (sexp:symbol s)
+  -> (match (alist/lookup int-type-alist s) with
+       (maybe:yes t) -> (maybe:yes (zparse:type t))
+       (maybe:no) -> (maybe:no)
+       )
+  _
+  -> (maybe:no)
+  )
+
+(define q-int-type (q-satisfy qtest-int-type 'int-type))
+(define qa-int-type (p-annotated q-int-type))
+
+(define (imp)
+  (raise (:Impossible)))
+
+;; type ::=
+;;   i8 i16 .. i256 ;; integers from one to 32 bytes
+;;   (VEC int type) ;; fixed-length vector
+;;   (REF type)     ;; reference
+;;   (QUOTE name)   ;; type variable
+;;   (ARROW type type ...) ;; function signature
+
+(define (zp-type)
+  (let ((tvars (cmap/make symbol-index-cmp)))
+
+    (define m-vec
+      (zparse:list (_ (zparse:int size) (zparse:type sub))) -> (zparse:type (type/vec size sub))
+      _ -> (imp)
+      )
+    (define m-ref
+      (zparse:list (_ (zparse:type sub))) -> (zparse:type (type/ref sub))
+      _ -> (imp)
+      )
+    (define m-tvar
+      (zparse:list (_ (zparse:sym s))) -> (zparse:type (type/var (cmap/add tvars s)))
+      _ -> (imp)
+      )
+
+    (define m-arrow
+      (zparse:list (_ (zparse:type rtype) (zparse:list argtypes)))
+      -> (zparse:type (type/arrow rtype (map zparse->type argtypes)))
+      _ -> (imp)
+      )
+
+    (fix
+     (lambda (zp-type*)
+       (p-annotated ;; factored out
+        (choice
+         q-int-type
+         (mp-form 'vec m-vec qa-int zp-type*)
+         (mp-form 'ref m-ref zp-type*)
+         (mp-form 'quote m-tvar qa-sym)
+         (mp-form '-> m-arrow zp-type* (zp-star zp-type*))
+         ))))
     ))
 
-;; ---- alpha conversion (renaming) ----
-
-(define (alpha exp args)
-
-  (define (R-binds env acc binds)
-    (match binds with
-      () -> (:tuple (reverse acc) env)
-      ((:tuple (:tuple v t) i) . tl)
-      -> (let (((v0 env0) (extend env v)))
-           (R-binds env0 (list:cons (:tuple (:tuple v0 t) (R env i)) acc) tl))
-      ))
-
-  (define R
-    env (clexp:lit n)          -> (clexp:lit n)
-    env (clexp:prim name exps) -> (clexp:prim name (map (partial (R env _)) exps))
-    env (clexp:seq exps)       -> (clexp:seq (map (partial (R env _)) exps))
-    env (clexp:let n t i body) -> (let (((n0 env0) (extend env n)))
-                                    (clexp:let n0 t (R env i) (R env0 body)))
-    env (clexp:ref name)       -> (clexp:ref (lookup env name))
-    env (clexp:set name val)   -> (clexp:set (lookup env name) (R env val))
-    env (clexp:if t c a)       -> (clexp:if (R env t) (R env c) (R env a))
-    env (clexp:call name args) -> (clexp:call name (map (partial (R env _)) args))
-    env (clexp:loop k binds b) -> (let (((k0 env0) (extend env k))
-                                        ((binds0 env1) (R-binds env0 (list:nil) binds)))
-                                    (clexp:loop k0 binds0 (R env1 b)))
-    env (clexp:appk k args)    -> (clexp:appk (lookup env k) (map (partial (R env _)) args))
-    )
-
-  (define gensym
-    (let ((counter 0))
-      (lambda (s)
-        (inc! counter)
-        (string->symbol (format (sym s) (int counter))))))
-
-  (define (extend env name)
-    (let ((name0 (gensym name)))
-      (:tuple name0 (alist:entry name name0 env))))
-
-  (define (lookup env name)
-    (match (alist/lookup env name) with
-      (maybe:yes name0) -> name0
-      (maybe:no)        -> (raise (:UnknownVariable name))
-      ))
-
-  (define initial-env
-    acc ()        -> acc
-    acc ((:tuple vname type) . tl) -> (initial-env (alist:entry vname vname acc) tl)
-    )
-
-  ;; XXX this is where we lose all info about renamings!  in a real compiler we should
-  ;;   keep a global map of such renamings, so we can trace any variable to its original
-  ;;   location in the source.
-  (R (initial-env (alist:nil) args) exp)
+(define zparse->type
+  (zparse:type t) -> t
+  _ -> (imp)
   )
 
-;; ---- modified pprint ----
-
-(define (pp0 exp width depth prefix)
-  (define (recur d exp)
-    (let ((size (pp-size exp)))
-      (if (< size width)
-	  (printf (repr exp))
-	  (match exp with
-	    (sexp:list ())
-	    -> (printf "()")
-	    (sexp:list (hd . tl))
-	    -> (begin (printf "(")
-		      (recur d hd)
-		      (for-each
-		       (lambda (x)
-			 (newline)
-                         (printf prefix)
-			 (indent (+ d 1))
-			 (recur (+ d 1) x)) tl)
-		      (printf ")"))
-	    ;; XXX complete for vector & record.
-	    _ -> (printf (repr exp))))))
-  (printf prefix)
-  (recur depth exp)
-  (print-string "\n")
+(define zparse->exp
+  (zparse:exp e) -> e
+  _ -> (imp)
   )
+
+;; ----- parse-exp -----
+
+;; note: also used by zp-defn.
+;; x:i32 => (%typed x i32)
+(define zp-tname
+  (map-ann ma-tname (za-list (q-litsym '%typed) q-sym (must (zp-type)))))
+
+(define ma-tname
+  src (zparse:list (_ (zparse:sym name) (zparse:type t)))
+  -> (zparse:tname (aztname:t name t src))
+  src _ -> (imp)
+  )
+
+;; probably better done with a macro.
+(define m-body
+  ((zparse:exp one))
+  -> one
+  many
+  -> (match many with
+       ((zparse:exp (azexp:t exp src)) . tl)
+       -> (azexp:t (zexp:seq (map zparse->exp many)) src)
+       _
+       -> (imp)
+       )
+  _
+  -> (imp)
+  )
+
+(define (zp-exp)
+
+  (define (m-ann src exp)
+    (zparse:exp (azexp:t exp src)))
+
+  (define m-int
+    (zparse:int n) -> (zexp:lit n)
+    _ -> (imp)
+    )
+  (define m-var
+    (zparse:sym s) -> (zexp:ref s)
+    _ -> (imp)
+    )
+  (define m-begin
+    (zparse:list (_ (zparse:list exps)))
+    -> (zexp:seq (map zparse->exp exps))
+    _ -> (imp)
+    )
+  (define m-if
+    (zparse:list (_ (zparse:exp texp) (zparse:exp cexp) (zparse:exp aexp)))
+    -> (zexp:if texp cexp aexp)
+    _ -> (imp)
+    )
+  (define m-set!
+    (zparse:list (_ (zparse:sym name) (zparse:exp val)))
+    -> (zexp:set name val)
+    _ -> (imp)
+    )
+  (define m-appk
+    (zparse:list (_ (zparse:sym name) (zparse:list args)))
+    -> (zexp:appk name (map zparse->exp args))
+    _ -> (imp)
+    )
+  (define m-call
+    (zparse:list ((zparse:sym name) (zparse:list args)))
+    -> (zexp:call name (map zparse->exp args))
+    _ -> (imp)
+    )
+
+  (define m-let
+    (zparse:list (_ (zparse:opt mloop) (zparse:list ((zparse:list binds))) (zparse:list exps)))
+    -> (m-let0 mloop binds exps)
+    _ -> (imp)
+    )
+
+  (define m-let0
+    (maybe:yes (zparse:sym name)) binds exps
+    -> (zexp:loop name (map m-bind binds) (m-body exps))
+    (maybe:no) binds exps
+    -> (m-let1 (m-body exps) (reverse binds))
+    _ _ _
+    -> (imp)
+    )
+
+  (define m-let1
+    body ()
+    -> (azexp/exp body)
+    body ((zparse:list ((zparse:tname tname) (zparse:exp init))) . binds)
+    -> (m-let1 (azexp:t (zexp:let tname init body) (aztname/src tname)) binds)
+    _ _
+    -> (imp)
+    )
+
+  (define m-bind
+    (zparse:list ((zparse:tname tname) (zparse:exp init)))
+    -> (:tuple tname init)
+    _
+    -> (imp)
+    )
+
+  ;; exp ::=
+  ;;   lit
+  ;;   (BEGIN exp ...)
+  ;;   (SET! name exp)
+  ;;   (IF exp exp exp)
+  ;;   (LET ((name exp) ...) exp ...)
+  ;;   (LET name ((name exp) ...) exp ...)
+  ;;   (APPK name exp ...)
+  ;;   (name exp ...)
+
+  (fix
+   (lambda (zp-exp*)
+     (map-ann
+      m-ann
+      (p-annotated
+       (choice
+        (mapP m-int q-int 'm-int) ;; literal
+        (mapP m-var q-sym 'm-var) ;; varref
+        (mp-form 'begin m-begin (zp-plus zp-exp*))
+        (mp-form 'if m-if zp-exp* zp-exp* zp-exp*)
+        ;; note: linearization of let could/should be done by a macro.
+        (mp-form 'let m-let
+                 (zp-opt qa-sym)
+                 (za-list (zp-plus (za-list zp-tname zp-exp*)))
+                 (zp-plus zp-exp*))
+        (mp-form 'set! m-set! qa-sym zp-exp*)
+        (mp-form 'appk m-appk qa-sym (zp-plus zp-exp*))
+        (mapP m-call (zp-list qa-sym (zp-plus zp-exp*)) 'm-app)
+        ))))))
+
+;; ----- definitions -----
+;; def ::=
+;;   (DEFINE (name formal ...) exp ...)
+
+(define m-tname
+  (zparse:tname tname)
+  -> tname
+  _
+  -> (imp)
+  )
+
+(define m-defn
+  (zparse:list (_ (zparse:list ((zparse:sym name) (zparse:list formals))) (zparse:list exps)))
+  -> (zfun:t name (map m-tname formals) (m-body exps))
+  x
+  -> (begin
+       (printf "imp!\n")
+       (printn x)
+       (imp)
+       )
+  )
+
+(define (zp-defn)
+  (p-annotated (mp-form 'define m-defn (za-list qa-sym (zp-star zp-tname)) (zp-plus (zp-exp)))))
+
+;; testing
+
+(define (parse-test s p r) ;; string, parser, print-result
+  (let ((exp0 (read2 "test" (string-reader s) #t)))
+    (printf "exp0:\n")
+    (pp (sexp:list exp0) 80)
+    (match (p.fun exp0) with
+      (result:no src label err)
+      -> (begin
+           (printf "unable to parser while reading " (repr label) "\n")
+           (printf "err = " err "\n")
+           (printf " at " (string src.path) ":" (int src.line) ":" (int src.pos) "\n"))
+      (result:fail src label err)
+      -> (begin
+           (printf (bold "parse fail") " while reading " (repr label) "\n")
+           (printf "err = " err "\n")
+           (printf " at " (string src.path) ":" (int src.line) ":" (int src.pos) "\n"))
+      (result:ok src x y)
+      -> (begin
+           (printf "result:\n")
+           (r x) (printf "\n")
+           (printf " at " (string src.path) ":" (int src.line) ":" (int src.pos) "\n")
+           )
+      )))
 
