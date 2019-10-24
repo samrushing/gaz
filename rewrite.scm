@@ -7,8 +7,8 @@
 
 ;; this is over-complicated by the var/cvar distinction.
 
-(define fvar  (var:t name _)  -> (format (sym name)))
-(define fcvar (cvar:t name _) -> (format (sym name)))
+(define fvar  (var:t name _) -> (format (sym name)))
+(define fcvar (cvar:t name)  -> (format (sym name)))
 
 (define (make-census cmpfun)
   (let ((census (tree/empty)))
@@ -33,7 +33,7 @@
   (var:t a _) (var:t b _) -> (symbol-index-cmp a b)
   )
 (define cmp-cvar
-  (cvar:t a _) (cvar:t b _) -> (symbol-index-cmp a b)
+  (cvar:t a) (cvar:t b) -> (symbol-index-cmp a b)
   )
 
 (define (rewrite-cps exp)
@@ -57,7 +57,7 @@
       S (var:t x ty) -> (var:t (apply-subst S x) ty)
       )
     (define apply-csubst
-      S (cvar:t k ty) -> (cvar:t (apply-subst S k) ty)
+      S (cvar:t k) -> (cvar:t (apply-subst S k))
       )
 
     (define (apply-subst S x)
@@ -79,7 +79,7 @@
       S (var:t k _) (var:t v _) -> (extend-subst S k v)
       )
     (define extend-csubst
-      S (cvar:t k _) (cvar:t v _) -> (extend-subst S k v)
+      S (cvar:t k) (cvar:t v) -> (extend-subst S k v)
       )
     (define (extend-vsubst* S ks vs)
       (match ks vs with
@@ -92,9 +92,9 @@
         ))
 
     (define extend-venv (var:t k _) v env -> (alist:entry k v env))
-    (define extend-cenv (cvar:t k _) v env -> (alist:entry k v env))
+    (define extend-cenv (cvar:t k) v env -> (alist:entry k v env))
     (define lookup-venv (var:t k _) env -> (alist/lookup env k))
-    (define lookup-cenv (cvar:t k _) env -> (alist/lookup env k))
+    (define lookup-cenv (cvar:t k) env -> (alist/lookup env k))
 
     (define (simp venv cenv S K)
 

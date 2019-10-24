@@ -58,47 +58,49 @@
    ('>=    sig-prim-cmp)
    ))
 
-(define solve
-  cenv (cps:prim name (var:t x tx) xs K)
-  -> (match (alist/lookup prim-type-map name) with
-       (maybe:yes fun)
-       -> (let ((txs (map var/type xs)))
-            (fun tx txs)
-            (solve cenv K))
-       (maybe:no)
-       -> (raise (:TypeError (:UnknownPrim name))))
-  cenv (cps:letval (var:t x tx) val K)
-  -> (solve cenv K) ;; probably not sufficient
-  cenv (cps:letcont (cvar:t k tk) xs K0 K1)
-  -> (let ((cenv0 (alist:entry k (map var/type xs) cenv)))
-       (solve cenv0 K0) ;; note: k is defined in the init because loop.
-       (solve cenv0 K1)
-       ;; XXX what about `tk`??
-       )
-  cenv (cps:appk (cvar:t k tk) xs)
-  -> (match (alist/lookup cenv k) with
-       (maybe:yes txs)
-       -> (for-list2 ta tb txs (map var/type xs)
-            (unify ta tb)
-            ;; XXX what about `tk`??
-            )
-       (maybe:no)
-       -> (begin
-            (printn cenv)
-            (raise (:TypeError (:UnknownContinuation k)))
-            )
-       )
-  cenv (cps:app name k vars)
-  -> (raise (:NotYetImplemented))
-  cenv (cps:if (var:t t tt) (cvar:t c tc) (cvar:t a ta))
-  -> (begin
-       (unify tt i1)
-       (unify tc ta))
-  cenv (cps:dead k)
-  -> (solve cenv k)
-  )
-
-
-
-
-
+(define (solve env exp)
+  (define (UK k0 k1)
+    (match (alist/lookup env k0) (alist/lookup env k1) with
+      (maybe:yes txs) (maybe:yes tys)
+      -> (for-list2 tx ty txs tys
+           (unify tx ty))
+      _ _
+      -> (raise (:TypeError (:UnknownContinuations k0 k1)))
+      ))
+  (match exp with
+    (cps:prim name (var:t x tx) xs K)
+    -> (match (alist/lookup prim-type-map name) with
+         (maybe:yes fun)
+         -> (let ((txs (map var/type xs)))
+              (fun tx txs)
+              (solve env K))
+         (maybe:no)
+         -> (raise (:TypeError (:UnknownPrim name))))
+    (cps:letval (var:t x tx) val K)
+    -> (solve env K) ;; probably not sufficient
+    (cps:letcont (cvar:t k) xs K0 K1)
+    -> (let ((env0 (alist:entry k (map var/type xs) env)))
+         (solve env0 K0) ;; note: k is defined in the init because loop.
+         (solve env0 K1)
+         )
+    (cps:appk (cvar:t k) xs)
+    -> (match (alist/lookup env k) with
+         (maybe:yes txs)
+         -> (for-list2 ta tb txs (map var/type xs)
+              (unify ta tb)
+              )
+         (maybe:no)
+         -> (begin
+              (printn env)
+              (raise (:TypeError (:UnknownContinuation k)))
+              )
+         )
+    (cps:app name k vars)
+    -> (raise (:NotYetImplemented))
+    (cps:if (var:t t tt) (cvar:t c) (cvar:t a))
+    -> (begin
+         (unify tt i1)
+         (UK c a))
+    (cps:dead k)
+    -> (solve env k)
+    ))

@@ -11,7 +11,7 @@
   (:t symbol type)
   )
 (datatype cvar
-  (:t symbol type)
+  (:t symbol)
   )
 (define var/name (var:t name _) -> name)
 (define var/type (var:t _ type) -> type)
@@ -62,12 +62,11 @@
 
 
 (define (dump-cps d exp)
-  (define fvart  (var:t x t)  -> (format (ansi green (sym x)) ":" (ftype t)))
-  (define fvar   (var:t x t)  -> (format (ansi green (sym x))))
-  (define fcvart (cvar:t x t) -> (format (ansi magenta (sym x)) ":" (ftype t)))
-  (define fcvar  (cvar:t x t) -> (format (ansi magenta (sym x))))
-  (define ftype t             -> (format (ansi yellow (repr (type->sexp (apply-subst t))))))
-  (define fname n             -> (format (ansi cyan (sym n))))
+  (define fvart  (var:t x t) -> (format (ansi green (sym x)) ":" (ftype t)))
+  (define fvar   (var:t x t) -> (format (ansi green (sym x))))
+  (define fcvar  (cvar:t x)  -> (format (ansi magenta (sym x))))
+  (define ftype t            -> (format (ansi yellow (repr (type->sexp (apply-subst t))))))
+  (define fname n            -> (format (ansi cyan (sym n))))
   (printf (repeat d "  "))
   (match exp with
     (cps:prim n x vars K)
@@ -80,7 +79,7 @@
          (dump-cps d K))
     (cps:letcont k xs K0 K1)
     -> (begin
-         (printf "letcont " (fcvart k) " " (join fvart " " xs) "\n")
+         (printf "letcont " (fcvar k) " " (join fvart " " xs) "\n")
          (dump-cps (+ d 1) K0)
          (dump-cps d K1)
          )
@@ -99,7 +98,7 @@
   (define SV
     (var:t name type) -> (sexp (sym name) (ST type)))
   (define SCV
-    (cvar:t name type) -> (sexp (sym name) (ST type)))
+    (cvar:t name) -> (sexp (sym name)))
   (define S
     (cps:prim n x vars k)    -> (sexp (sym 'prim) (sym n) (SV x)
                                       (list (map SV vars))
@@ -142,7 +141,7 @@
   (define genvar (gensym "r"))
   (define gencont (gensym "L"))
   (define (newvar) (var:t (genvar) (make-tvar)))
-  (define (newcont) (cvar:t (gencont) (make-tvar)))
+  (define (newcont) (cvar:t (gencont)))
 
   (define (cps-args args vars K)
     (match args with
@@ -221,7 +220,7 @@
       (zexp:loop name binds body)
       -> (let (((vars0 inits) (zip binds))
                (vars1 (map aztname->var vars0))
-               (kname (cvar:t name (make-tvar)))
+               (kname (cvar:t name))
                (k0 (newcont))
                (x0 (newvar)))
            (cps-args
@@ -289,7 +288,7 @@
       (zexp:loop name binds body)
       -> (let (((vars0 inits) (zip binds))
                (vars1 (map aztname->var vars0))
-               (kname (cvar:t name (make-tvar)))
+               (kname (cvar:t name))
                )
            (cps-args
             inits '()
@@ -299,12 +298,12 @@
                (cps-tail body k)
                (cps:appk kname vars2)))))
       (zexp:appk k vals)
-      -> (cps-args vals '() (lambda (vars) (cps:appk (cvar:t k (make-tvar)) vars)))
+      -> (cps-args vals '() (lambda (vars) (cps:appk (cvar:t k) vars)))
       x
       -> (raise (:NotYet x))
       ))
 
-  (cps-tail exp (cvar:t 'halt (make-tvar)))
+  (cps-tail exp (cvar:t 'halt))
 
   )
 
