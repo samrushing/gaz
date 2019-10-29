@@ -74,9 +74,9 @@
 
 ;; XXX consider rewriting <exp> with solved types, rather than
 ;;   requiring users to apply-subst at all types.
-(define (solve tenv env exp)
+(define (solve tenv cenv exp)
 
-  (define (UK k0 k1)
+  (define (UK env k0 k1)
     (match (alist/lookup env k0) (alist/lookup env k1) with
       (maybe:yes txs) (maybe:yes tys)
       -> (for-list2 tx ty txs tys
@@ -115,17 +115,15 @@
            -> (for-list2 ta tb txs (map var/type xs)
                 (unify ta tb))
            (maybe:no)
-           -> (begin
-                (printn env)
-                (raise (:TypeError (:UnknownContinuation k)))))
+           -> (raise (:TypeError (:UnknownContinuation k))))
       (cps:app name k vars)
       -> (raise (:NotYetImplemented))
       (cps:if (var:t t tt) (cvar:t c) (cvar:t a))
       -> (begin
            (unify tt i1)
-           (UK c a))
+           (UK env c a))
       (cps:dead k)
       -> (S env k)
       ))
-  (S env exp)
+  (S cenv exp)
   )
