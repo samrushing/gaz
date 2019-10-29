@@ -220,8 +220,17 @@
   -> (maybe:no)
   )
 
+(define qtest-none-type
+  (sexp:symbol 'none)
+  -> (maybe:yes (zparse:type none))
+  _
+  -> (maybe:no)
+  )
+
 (define q-int-type (q-satisfy qtest-int-type 'int-type))
 (define qa-int-type (p-annotated q-int-type))
+(define q-none-type (q-satisfy qtest-none-type 'none-type))
+(define qa-none-type (p-annotated q-none-type))
 
 (define (imp)
   (raise (:Impossible)))
@@ -260,6 +269,7 @@
        (p-annotated ;; factored out
         (choice
          q-int-type
+         q-none-type
          (mp-form 'vec m-vec qa-int zp-type*)
          (mp-form 'ref m-ref zp-type*)
          (mp-form 'quote m-tvar qa-sym)
@@ -398,11 +408,11 @@
         ;; note: linearization of let could/should be done by a macro.
         (mp-form 'let m-let
                  (zp-opt qa-sym)
-                 (za-list (zp-plus (za-list zp-tname zp-exp*)))
+                 (za-list (zp-star (za-list zp-tname zp-exp*)))
                  (zp-plus zp-exp*))
         (mp-form 'set! m-set! qa-sym zp-exp*)
-        (mp-form 'appk m-appk qa-sym (zp-plus zp-exp*))
-        (mapP m-call (zp-list qa-sym (zp-plus zp-exp*)) 'm-app)
+        (mp-form 'appk m-appk qa-sym (zp-star zp-exp*))
+        (mapP m-call (zp-list qa-sym (zp-star zp-exp*)) 'm-app)
         ))))))
 
 ;; ----- definitions -----
@@ -418,40 +428,30 @@
 
 (define m-defn
   (zparse:list (_ (zparse:list ((zparse:sym name) (zparse:list formals))) (zparse:list exps)))
-  -> (zfun:t name (map m-tname formals) (m-body exps))
-  x
-  -> (begin
-       (printf "imp!\n")
-       (printn x)
-       (imp)
-       )
+  -> (ztop:fun name (map m-tname formals) (m-body exps))
+  _
+  -> (imp)
   )
 
 (define (zp-defn)
   (p-annotated (mp-form 'define m-defn (za-list qa-sym (zp-star zp-tname)) (zp-plus (zp-exp)))))
 
-;; testing
+;; ----- declarations -----
 
-(define (parse-test s p r) ;; string, parser, print-result
-  (let ((exp0 (read2 "test" (string-reader s) #t)))
-    (printf "exp0:\n")
-    (pp (sexp:list exp0) 80)
-    (match (p.fun exp0) with
-      (result:no src label err)
-      -> (begin
-           (printf "unable to parser while reading " (repr label) "\n")
-           (printf "err = " err "\n")
-           (printf " at " (string src.path) ":" (int src.line) ":" (int src.pos) "\n"))
-      (result:fail src label err)
-      -> (begin
-           (printf (bold "parse fail") " while reading " (repr label) "\n")
-           (printf "err = " err "\n")
-           (printf " at " (string src.path) ":" (int src.line) ":" (int src.pos) "\n"))
-      (result:ok src x y)
-      -> (begin
-           (printf "result:\n")
-           (r x) (printf "\n")
-           (printf " at " (string src.path) ":" (int src.line) ":" (int src.pos) "\n")
-           )
-      )))
+(define m-decl
+  (zparse:list (_ (zparse:sym name) (zparse:list argtypes) _ (zparse:type rtype)))
+  -> (ztop:decl name (type/arrow rtype (map zparse->type argtypes)))
+  _
+  -> (imp)
+  )
 
+(define (zp-decl)
+  (p-annotated
+   (mp-form 'declare m-decl
+            qa-sym (zp-star (zp-type)) (qa-litsym '->) (zp-type))))
+
+(define (zp-top)
+  (choice
+   (zp-defn)
+   (zp-decl)
+   ))
