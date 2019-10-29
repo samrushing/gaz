@@ -13,6 +13,7 @@ TODO
 * add functions (maybe?)
   Thought I needed functions for loops, but if instead I expose 'appk' to the user
     we can implement loops/recursion directly with conts.  I think.
+    [YES this works]
 
 sample application
 ------------------
