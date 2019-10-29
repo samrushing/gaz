@@ -69,7 +69,7 @@
     (define vars-eq?
       () ()               -> #t
       (h0 . t0) (h1 . t1) -> (if (eq? h0 h1) (vars-eq? t0 t1) #f)
-      a b                 -> (raise (:BadArity a b))
+      a b                 -> #f
       )
 
     (define (extend-subst S k v)
@@ -98,6 +98,8 @@
 
     (define (simp venv cenv S K)
 
+      ;; XXX get rid of the `partial`s below by moving apply/extends in here?
+
       (define (N s e)
 	;; notify that a pass has a hit
         (inc! nopt)
@@ -124,10 +126,11 @@
         -> (let ((j2 (apply-csubst S j)))
              (if (vars-eq? xs0 xs1)
                  (N 'eta-cont (simp venv cenv (extend-csubst S k j2) K))
-                 (let ((xs2 (map (partial (apply-vsubst S _)) xs1)))
+                 (let ((xs0* (map (partial (apply-vsubst S _)) xs0))
+                       (xs1* (map (partial (apply-vsubst S _)) xs1)))
                    (cps:letcont
-                    k xs2
-                    (cps:appk j2 xs1)
+                    k xs0*
+                    (cps:appk j2 xs1*)
                     (simp venv cenv S K) ;; XXX extend cenv?
                     ;; this might be what's needed *if so*
                     ;;(simp venv (extend-cenv k (:tuple xs2 (cps:appk j2 xs1)) cenv) S K)
@@ -159,7 +162,7 @@
         (cps:if tst con alt)
         -> (match (lookup-venv tst venv) with
              (maybe:yes n)
-             -> (N 'beta-case (simp venv cenv S (cps:appk (if (zero? n) alt con) (list tst))))
+             -> (N 'beta-case (simp venv cenv S (cps:appk (if (zero? n) alt con) (list))))
              _
              -> (cps:if tst con alt)
              )
