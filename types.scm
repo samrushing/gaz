@@ -18,6 +18,7 @@
   (:arrow type (list type) typerec)
   (:ref type typerec)
   (:var int typerec)
+  (:none typerec)
   ;; I think we need this, too.
   ;; (:bool bool typerec)
   )
@@ -37,6 +38,9 @@
 (define (type/var i)
   (type:var i (typerec/new)))
 
+(define (type/none)
+  (type:none (typerec/new)))
+
 (define tvar-counter (make-counter 0))
 
 (define (new-tvar)
@@ -48,9 +52,13 @@
   (type:arrow _ _ r) -> r
   (type:ref _ r)     -> r
   (type:var _ r)     -> r
+  (type:none r)      -> r
   )
 
 (define type<? magic<?)
+
+;; NOTE: all types will be rename 'uN' rather than 'iN' to reflect
+;;  our only-unsigned positioning.
 
 ;; singleton base types
 (define i1   (type/int 1))
@@ -60,6 +68,7 @@
 (define i64  (type/int 64))
 (define i128 (type/int 128))
 (define i256 (type/int 256))
+(define none (type/none))
 
 (define type->sexp
   (type:int 1 _)      -> (sexp:symbol 'i1)
@@ -74,6 +83,7 @@
   (type:ref t _)      -> (sexp (sym 'ref) (type->sexp t))
   (type:var i _)      -> (sexp (sym 'quote) (sym (string->symbol (format (int i)))))
   (type:arrow r xs _) -> (sexp (sym '->) (type->sexp r) (list (map type->sexp xs)))
+  (type:none _)       -> (sexp:symbol 'none)
   )
 
 (define parse-type
@@ -84,6 +94,7 @@
   (sexp:symbol 'i64)  -> i64
   (sexp:symbol 'i128) -> i128
   (sexp:symbol 'i256) -> i256
+  (sexp:symbol 'none) -> none
   ;; vector
   (sexp:list ((sexp:symbol 'vec) (sexp:int size) type))
   -> (type/vec size (parse-type type))
@@ -130,9 +141,10 @@
       (raise (:TypeError (:Unify t0s t1s)))
       ))
 
+  ;; XXX I don't think we need this feature.
   (define U-int
     ;; allow t0 to unify with any other legit int.
-    ;; [i.e. t0 acts like a type variable for integer size]
+    ;; [i.e. i0 acts like a type variable for integer size]
     (type:int 0 _) (type:int 0 _)   -> (type-error t0 t1)
     (type:int 0 _) (type:int nv _)  -> #u
     (type:int nu _) (type:int 0 _)  -> #u
@@ -146,6 +158,8 @@
           (v (type-find t1)))
       (when (not (eq? u v))
         (match u v with
+          (type:none _) (type:none _)
+          -> #u
           (type:int nu _) (type:int nv _)
           -> (U-int u v)
           (type:vec nu tu _) (type:vec nv tv _)
@@ -173,6 +187,7 @@
         (type:arrow rt ats r) -> (type:arrow (p rt) (map p ats) r)
         (type:ref rt r)       -> (type:ref (p rt) r)
         (type:int _ _)        -> t0
+        (type:none _)         -> t0
         )))
   (p t))
 
