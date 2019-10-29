@@ -60,7 +60,6 @@
   (:dead cps)                        ;; K (for seq)
   )
 
-
 (define (dump-cps d exp)
   (define fvart  (var:t x t) -> (format (ansi green (sym x)) ":" (ftype t)))
   (define fvar   (var:t x t) -> (format (ansi green (sym x))))
@@ -124,7 +123,7 @@
 ;; CPS conversion
 ;; --------------
 
-(define (zexp->cps exp)
+(define (zexp->cps tenv exp)
 
   (define make-tvar
     (let ((counter 0))
@@ -143,10 +142,10 @@
   (define (newvar) (var:t (genvar) (make-tvar)))
   (define (newcont) (cvar:t (gencont)))
 
-  (define (cps-args args vars K)
+  (define (cps-args env args vars K)
     (match args with
       ()        -> (K (reverse vars))
-      (hd . tl) -> (cps hd (lambda (v) (cps-args tl (list:cons v vars) K)))
+      (hd . tl) -> (cps env hd (lambda (v) (cps-args env tl (list:cons v vars) K)))
       ))
 
   (define (zip items)
@@ -160,27 +159,58 @@
     (aztname:t name type src) -> (var:t name type)
     )
 
+  (define (extend env var)
+    (match var with
+      (var:t name _) -> (alist:entry name var env)
+      ))
+
+  (define extend*
+    env ()        -> env
+    env (hd . tl) -> (extend* (extend env hd) tl)
+    )
+
+  (define (lookup-val env name)
+    (alist/lookup env name))
+
+  (define (lookup-type name)
+    (match (alist/lookup tenv name) with
+      (maybe:yes t) -> t
+      (maybe:no)    -> (make-tvar)
+      ))
+
+  (define (valid-funcall? name nargs)
+    (match (alist/lookup tenv name) with
+      (maybe:yes (type:arrow rtype argtypes _))
+      -> (= nargs (length argtypes))
+      _
+      -> #f
+      ))
+
   ;; This is the square-bracket [[X]] conversion from CwCC
   (define cps
     ;; strip src annotation [for now]
-    (azexp:t exp src) K -> (cps* exp K)
+    env (azexp:t exp src) K -> (cps* env exp K)
     )
 
-  (define (cps* exp K)
+  (define (cps* env exp K)
     (match exp with
       ;; currently only int.
       (zexp:lit n)
       -> (let ((x (newvar)))
            (cps:letval x n (K x)))
       (zexp:ref s)
-      -> (K (var:t s (make-tvar)))
-      (zexp:set name exp)
+      -> (match (lookup-val env s) with
+           (maybe:yes v) -> (K v)
+           ;; XXX require declarations of external funs.
+           (maybe:no) -> (K (var:t s (lookup-type s))))
+      ;;-> (K (var:t s (make-tvar)))
+      (zexp:set name v)
       -> (raise (:NotImplemented exp))
       (zexp:call name args)
       -> (let ((x (newvar))
                (k (newcont)))
-           (cps-args args '()
-             (if (member-eq? name prims)
+           (cps-args env args '()
+             (if (or (member-eq? name prims) (valid-funcall? name (length args)))
                  (lambda (vars)
                    (cps:prim name x vars (K x)))
                  (lambda (vars)
@@ -191,31 +221,30 @@
       -> (let loop ((exps exps))
            (match exps with
              ()        -> (raise (:EmptySequence))
-             (one)     -> (cps one K)
-             (hd . tl) -> (cps hd (lambda (x1) (cps:dead (loop tl))))
+             (one)     -> (cps env one K)
+             (hd . tl) -> (cps env hd (lambda (x1) (cps:dead (loop tl))))
              ))
       (zexp:let (aztname:t name type _) init body)
-      -> (let ((j (newcont)))
+      -> (let ((j (newcont))
+               (v (var:t name type)))
            (cps:letcont
-            j (list (var:t name type))
-            (cps body K)
-            (cps-tail init j)))
+            j (list v)
+            (cps (extend env v) body K)
+            (cps-tail env init j)))
       (zexp:if test con alt)
       -> (let ((j (newcont))
                (x (newvar))
-               (x1 (newvar))
-               (x2 (newvar))
                (k1 (newcont))
                (k2 (newcont)))
            (cps
-            test
+            env test
             (lambda (z)
               (cps:letcont
                j (list x) (K x)
                (cps:letcont
-                k1 (list x1) (cps-tail con j)
+                k1 (list) (cps-tail env con j)
                 (cps:letcont
-                 k2 (list x2) (cps-tail alt j)
+                 k2 (list) (cps-tail env alt j)
                  (cps:if z k1 k2)))))))
       (zexp:loop name binds body)
       -> (let (((vars0 inits) (zip binds))
@@ -224,11 +253,12 @@
                (k0 (newcont))
                (x0 (newvar)))
            (cps-args
+            (extend* env vars1)
             inits '()
             (lambda (vars2)
               (cps:letcont
                kname vars1
-               (cps-tail body k0)
+               (cps-tail (extend* env vars1) body k0)
                (cps:letcont
                 k0 (list x0) (K x0)
                 (cps:appk kname vars2))))))
@@ -241,49 +271,54 @@
 
   ;; This is the rounded-bracket ((X)) conversion from CwCC
   (define cps-tail
-    (azexp:t exp src) k -> (cps-tail* exp k)
+    env (azexp:t exp src) k -> (cps-tail* env exp k)
     )
 
-  (define (cps-tail* exp k)
+  (define (cps-tail* env exp k)
     (match exp with
       (zexp:lit n)
       -> (let ((x (newvar)))
            (cps:letval x n (cps:appk k (list x))))
       (zexp:ref s)
-      -> (cps:appk k (list (var:t s (make-tvar))))
+      -> (cps:appk
+          k (list
+             (match (lookup-val env s) with
+               (maybe:yes var) -> var
+               (maybe:no) -> (var:t s (lookup-type s)))))
+      (zexp:set s v)
+      -> (raise (:NotImplemented exp))
       (zexp:seq exps)
       -> (let loop ((exps exps))
            (match exps with
              ()           -> (raise (:EmptySequence))
-             (exp)        -> (cps-tail exp k)
-             (exp . exps) -> (cps exp (lambda (x1) (cps:dead (loop exps))))
+             (exp)        -> (cps-tail env exp k)
+             (exp . exps) -> (cps env exp (lambda (x1) (cps:dead (loop exps))))
              ))
       (zexp:call name args)
       -> (cps-args
-          args '()
-          (if (member-eq? name prims)
+          env args '()
+          (if (or (member-eq? name prims) (valid-funcall? name (length args)))
               (lambda (vars)
                 (let ((x (newvar)))
                   (cps:prim name x vars (cps:appk k (list x)))))
               (lambda (vars) (cps:app name k vars))))
       (zexp:let (aztname:t name type _) init body)
-      -> (let ((j (newcont)))
+      -> (let ((j (newcont))
+               (v (var:t name type)))
            (cps:letcont
-            j (list (var:t name type))
-            (cps-tail body k)
-            (cps-tail init j)))
+            j (list v)
+            (cps-tail (extend env v) body k)
+            (cps-tail env init j)))
       (zexp:if test con alt)
-      -> (let ((x1 (newvar))
-               (x2 (newvar))
-               (k1 (newcont))
+      -> (let ((k1 (newcont))
                (k2 (newcont)))
            (cps
-            test
+            env test
             (lambda (z)
              (cps:letcont
-              k1 (list x1) (cps-tail con k)
+              k1 (list) (cps-tail env con k)
               (cps:letcont
-               k2 (list x2) (cps-tail alt k)
+               k2 (list) (cps-tail env alt k)
                (cps:if z k1 k2))))))
       (zexp:loop name binds body)
       -> (let (((vars0 inits) (zip binds))
@@ -291,19 +326,19 @@
                (kname (cvar:t name))
                )
            (cps-args
-            inits '()
+            (extend* env vars1) inits '()
             (lambda (vars2)
               (cps:letcont
                kname vars1
-               (cps-tail body k)
+               (cps-tail (extend* env vars1) body k)
                (cps:appk kname vars2)))))
       (zexp:appk k vals)
-      -> (cps-args vals '() (lambda (vars) (cps:appk (cvar:t k) vars)))
+      -> (cps-args env vals '() (lambda (vars) (cps:appk (cvar:t k) vars)))
       x
       -> (raise (:NotYet x))
       ))
 
-  (cps-tail exp (cvar:t 'halt))
+  (cps-tail (alist:nil) exp (cvar:t 'halt))
 
   )
 
