@@ -43,7 +43,7 @@
     (let ((counter 0))
       (lambda (s)
         (inc! counter)
-        (string->symbol (format (sym s) (int counter))))))
+        (string->symbol (format "u_" (sym s) (int counter))))))
 
   (define extend
     env (aztname:t name type src)
@@ -67,9 +67,11 @@
   ;;   keep a global map of such renamings, so we can trace any variable to its original
   ;;   location in the source.
   (match fun with
-    (zfun:t name formals body)
+    (ztop:fun name formals body)
     -> (let ((env (initial-env (alist:nil) formals)))
-         (zfun:t name formals (RA env body)))
+         (ztop:fun name formals (RA env body)))
+    otherwise
+    -> otherwise
     )
   )
 
