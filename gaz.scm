@@ -13,118 +13,105 @@
 (require "./cps.scm")
 (require "./rewrite.scm")
 (require "./solve.scm")
-;;(require "./cps2llvm.scm")
+(require "./cps2llvm.scm")
 
 ;; ----- testing -----
 
-(define (parse-zfun s)
-  (let ((p (zp-defn))
-        (exp0 (read2 "test" (string-reader s) #t)))
-    (pp0 (first exp0) 80 0 "")
-    (match (p.fun exp0) with
-      (result:no src label err)
-      -> (begin
-           (printf "unable to parser while reading " (repr label) "\n")
-           (printf "err = " err "\n")
-           (printf " at " (string src.path) ":" (int src.line) ":" (int src.pos) "\n")
-           (raise (:ParseFail)))
-      (result:fail src label err)
-      -> (begin
-           (printf (bold "parse fail") " while reading " (repr label) "\n")
-           (printf "err = " err "\n")
-           (printf " at " (string src.path) ":" (int src.line) ":" (int src.pos) "\n")
-           (raise (:ParseFail)))
-      (result:ok src fun rest) ;; note: ignoring `rest`
-      -> (begin
-           (printf "result:\n")
-           (dump-azfun fun) (printf "\n")
-           (printf " at " (string src.path) ":" (int src.line) ":" (int src.pos) "\n")
-           (:tuple src fun)
-           )
-      )))
+(define (parse-file path)
+  (let ((p (zp-top))
+        (ifile (file/open-read path))
+        (read-char (lambda () (file/read-char ifile)))
+        (exps (read2 path read-char #t))
+        (result '()))
+    ;;(pp0 (first exp0) 80 0 "")
+    (for-list exp exps
+      (match (p.fun (list exp)) with
+        (result:no src label err)
+        -> (begin
+             (printf "unable to parser while reading " (repr label) "\n")
+             (printf "err = " err "\n")
+             (printf " at " (string src.path) ":" (int src.line) ":" (int src.pos) "\n")
+             (raise (:ParseFail)))
+        (result:fail src label err)
+        -> (begin
+             (printf (bold "parse fail") " while reading " (repr label) "\n")
+             (printf "err = " err "\n")
+             (printf " at " (string src.path) ":" (int src.line) ":" (int src.pos) "\n")
+             (raise (:ParseFail)))
+        (result:ok src top rest) ;; note: ignoring `rest`
+        -> (begin
+             (printf "result:\n")
+             (dump-ztop top) (printf "\n")
+             (printf " at " (string src.path) ":" (int src.line) ":" (int src.pos) "\n")
+             (push! result (:tuple src top)))
+             ))
+    (file/close ifile)
+    result))
 
-;; XXX YOU ARE HERE
-;; lotta stuff unfinished all over the place, but the next logical
-;;  step to the 'end' is to invoke cps2llvm on this. then we need to:
+;; TODO
 ;;
 ;;  X * parse to zfun
-;;  * cps2llvm
-;;    needs to be taught about types.
+;;  X * cps2llvm needs to be taught about types.
 ;;  * do 'something' with src information
 ;;     * eventually fix/test parse errors
-;;  * add type checking
-;;  * propagate type info all the way down to llvm
+;;  X * add type checking
+;;  X * propagate type info all the way down to llvm
+;;  X * calling external functions.
+;;      I think this is basically `prim`, since it is binding
+;;        a new value and acts like a single insn.
 ;;  * MBE
+;;  * implement `ref` and `set!`.
+;;  * rename 'halt' to 'return'? [this kinda depends on if/when we'll add (internal) functions]
+;;  * collect types from defined functions, put them in the type env.
 ;;
 ;;  [eventually]
 ;;  * revisit the awfulness that is the parser AGAIN.
 ;;    I think it might be possible to do something like parsec, but simplified
 ;;    and more s-expression friendly?
 
-(define (tcps s)
-  (match (parse-zfun s) with
-    (:tuple src fun)
-    -> (let ((fun0 (alpha fun)))
-         (match fun0 with
-           (zfun:t name formals body)
-           -> (let ((cps0 (zexp->cps body))
-                    (cps1 (rewrite-cps cps0))
-                    )
-                (printf "\ncps0:\n")
-                (dump-cps 0 cps0)
-                (printf "\ncps1:\n")
-                (dump-cps 0 cps1)
-                (solve (alist:entry 'halt (list (new-tvar)) (alist:nil)) cps1)
-                (dump-cps 0 cps1)
-;;              (cpsfun->llvm name args cps1)
-                )
-           )
-         )
+;; XXX options
+
+(define (main)
+
+  (define formals->tenv
+    env ()                        -> env
+    env ((aztname:t x tx _) . tl) -> (formals->tenv (alist:entry x tx env) tl)
+    )
+
+  (let ((path sys.argv[1])
+        (tops (parse-file sys.argv[1]))
+        (tenv (alist:nil))
+        (funs '())
+        (compiled '())
+        )
+    (for-list top tops
+      (match top with
+        (:tuple src top)
+        -> (match top with
+             (ztop:fun _ _ _)      -> (push! funs top)
+             (ztop:decl name type) -> (alist/push tenv name type)
+             )))
+    (for-list fun (reverse funs)
+      (match (alpha fun) with
+        (ztop:fun name formals body)
+        -> (let ((tenv0 (formals->tenv tenv formals))
+                 (cps0 (zexp->cps tenv0 body))
+                 (cps1 (rewrite-cps cps0))
+                 (rtype (new-tvar)))
+             (printf "\ncps0:\n")
+             (dump-cps 0 cps0)
+             (printf "\ncps1:\n")
+             (dump-cps 0 cps1)
+             (solve tenv (alist:entry 'halt (list rtype) (alist:nil)) cps1)
+             (printf "\ntyped:\n")
+             (dump-cps 0 cps1)
+             (push! compiled (:tuple name rtype formals cps1))
+             )
+        _
+        -> #u
+        ))
+    (compiled->llvm path tenv compiled)
     ))
 
-(tcps "
- (define (main argc : i64)
-   (let loop ((acc:i64 1)
-              (n:i64 argc))
-     (if (= n 1)
-         acc
-         (appk loop (* acc n) (- n 1)))))"
-      )
+(main)
 
-;; (tcps "
-;;  (define (main)
-;;    (let ((x:i64 0)
-;;          (y:i64 1))
-;;      (+ x y)))"
-;;       )
-
-;; (tcps "
-;;  (define (main argc:i64)
-;;    (if 1 3 4)
-;;    )")
-
-;; (tcps "
-;; (define (main)
-;;   (let ((z:i32 34)
-;;         (y:i32 19))
-;;     (* (+ 22 y)
-;;        (* z
-;;           (+ z
-;;              (- y 11))))))")
-
-;; test beta-cont
-;; (tcps "
-;;  (define (main)
-;;    (let ((x:i64 19))
-;;      (+ x 34)))"
-;;       )
-
-;; test loop in non-tail position
-;; (tcps "
-;;  (define (main)
-;;    (+ (let loop ((n:i32 5))
-;;         (if (= n 0)
-;;            99
-;;            (appk loop (- n 1))))
-;;        1))"
-;;       )
