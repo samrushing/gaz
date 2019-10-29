@@ -45,10 +45,11 @@
   (:appk symbol (list azexp))        ;; kname arg
   )
 
-;; gaz function
-(datatype zfun
-  ;;   name      formals    body
-  (:t symbol (list aztname) azexp)
+(datatype ztop
+  ;;     name      formals    body
+  (:fun symbol (list aztname) azexp)
+  ;;     name   type
+  (:decl symbol type)
   )
 
 (define indent-src
@@ -69,8 +70,8 @@
        )
   )
 
-(define dump-azfun
-  (zfun:t name formals body)
+(define dump-ztop
+  (ztop:fun name formals body)
   -> (begin
        (indent-src null-src 0)
        (printf "define " (ansi cyan (sym name)))
@@ -82,7 +83,13 @@
                 (printf (ansi cyan (sym name)) ":" (ansi yellow (repr (type->sexp ztype)))))
            ))
        (dump-azexp 2 body)
-       ))
+       )
+  (ztop:decl name type)
+  -> (begin
+       (indent-src null-src 0)
+       (printf "declare " (ansi cyan (sym name)) " " (repr (type->sexp type)))
+       )
+  )
 
 ;; demonstrates that we have correctly annotated every sub-expression.
 (define dump-zexp
