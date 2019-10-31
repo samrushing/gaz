@@ -127,3 +127,21 @@
       ))
   (S cenv exp)
   )
+
+;; apply-subst recursively over a typed cps expression.
+(define (cps-subst exp)
+  (define Av
+    (var:t x tx) -> (var:t x (apply-subst tx))
+    )
+  (define A
+    (cps:prim name x xs K)   -> (cps:prim name (Av x) (map Av xs) (A K))
+    (cps:letval x val K)     -> (cps:letval (Av x) val (A K))
+    (cps:letcont k xs K0 K1) -> (cps:letcont k (map Av xs) (A K0) (A K1))
+    (cps:appk k xs)          -> (cps:appk k (map Av xs))
+    (cps:app name k xs)      -> (cps:app name k (map Av xs))
+    (cps:if x k0 k1)         -> (cps:if (Av x) k0 k1)
+    (cps:dead K)             -> (cps:dead (A K))
+    )
+  (A exp)
+  )
+

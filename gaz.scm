@@ -103,10 +103,11 @@
              (printf "\ncps1:\n")
              (dump-cps 0 cps1)
              (solve tenv (alist:entry 'halt (list rtype) (alist:nil)) cps1)
-             (printf "\ntyped:\n")
-             (dump-cps 0 cps1)
-             (push! compiled (:tuple name rtype formals cps1))
-             )
+             (let ((cps2 (cps-subst cps1)))
+               (printf "\ntyped:\n")
+               (dump-cps 0 cps2)
+               (push! compiled (:tuple name rtype formals cps2))
+             ))
         _
         -> #u
         ))
