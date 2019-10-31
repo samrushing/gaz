@@ -338,11 +338,11 @@
     -> (zexp:if texp cexp aexp)
     _ -> (imp)
     )
-  (define m-set!
-    (zparse:list (_ (zparse:sym name) (zparse:exp val)))
-    -> (zexp:set name val)
-    _ -> (imp)
-    )
+  ;; (define m-set!
+  ;;   (zparse:list (_ (zparse:sym name) (zparse:exp val)))
+  ;;   -> (zexp:set name val)
+  ;;   _ -> (imp)
+  ;;   )
   (define m-appk
     (zparse:list (_ (zparse:sym name) (zparse:list args)))
     -> (zexp:appk name (map zparse->exp args))
@@ -410,7 +410,7 @@
                  (zp-opt qa-sym)
                  (za-list (zp-star (za-list zp-tname zp-exp*)))
                  (zp-plus zp-exp*))
-        (mp-form 'set! m-set! qa-sym zp-exp*)
+        ;; (mp-form 'set! m-set! qa-sym zp-exp*)
         (mp-form 'appk m-appk qa-sym (zp-star zp-exp*))
         (mapP m-call (zp-list qa-sym (zp-star zp-exp*)) 'm-app)
         ))))))

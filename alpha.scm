@@ -30,7 +30,7 @@
     src env (zexp:let nt i body)  -> (let (((nt0 env0) (extend env nt)))
                                        (zexp:let nt0 (RA env i) (RA env0 body)))
     src env (zexp:ref name)       -> (zexp:ref (lookup env name))
-    src env (zexp:set name val)   -> (zexp:set (lookup env name) (RA env val))
+    ;; src env (zexp:set name val)   -> (zexp:set (lookup env name) (RA env val))
     src env (zexp:if t c a)       -> (zexp:if (RA env t) (RA env c) (RA env a))
     src env (zexp:call name args) -> (zexp:call name (map (partial (RA env _)) args))
     src env (zexp:loop k binds b) -> (let (((k0 env0) (extend env (aztname:t k (new-tvar) src)))

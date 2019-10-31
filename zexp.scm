@@ -36,7 +36,7 @@
   (:seq (list azexp))                ;; exp ...
   (:let aztname azexp azexp)         ;; name:type init body
   (:ref symbol)                      ;; name
-  (:set symbol azexp)                ;; name value
+  ;;(:set symbol azexp)                ;; name value
   (:if azexp azexp azexp)            ;; test con alt
   (:call symbol (list azexp))        ;; name args
   (:loop symbol                      ;; name
@@ -113,10 +113,10 @@
        (dump-azexp (+ d 1) b)
        (dump-azexp (+ d 1) t)
        (dump-azexp (+ d 1) f))
-  d (zexp:set name exp)
-  -> (begin
-       (printf "set " (ansi cyan (sym name)))
-       (dump-azexp (+ d 1) exp))
+  ;; d (zexp:set name exp)
+  ;; -> (begin
+  ;;      (printf "set " (ansi cyan (sym name)))
+  ;;      (dump-azexp (+ d 1) exp))
   d (zexp:appk name exps)
   -> (begin
        (printf "appk " (ansi cyan (sym name)))

@@ -203,9 +203,8 @@
            (maybe:yes v) -> (K v)
            ;; XXX require declarations of external funs.
            (maybe:no) -> (K (var:t s (lookup-type s))))
-      ;;-> (K (var:t s (make-tvar)))
-      (zexp:set name v)
-      -> (raise (:NotImplemented exp))
+      ;; (zexp:set name v)
+      ;; -> (raise (:NotImplemented exp))
       (zexp:call name args)
       -> (let ((x (newvar))
                (k (newcont)))
@@ -285,8 +284,8 @@
              (match (lookup-val env s) with
                (maybe:yes var) -> var
                (maybe:no) -> (var:t s (lookup-type s)))))
-      (zexp:set s v)
-      -> (raise (:NotImplemented exp))
+      ;; (zexp:set s v)
+      ;; -> (raise (:NotImplemented exp))
       (zexp:seq exps)
       -> (let loop ((exps exps))
            (match exps with
