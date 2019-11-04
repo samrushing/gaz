@@ -31,6 +31,17 @@
         -> (raise (:EmptyPath?))
         )))
 
+  ;; format a type for llvm.
+  (define (ftype t)
+    (match (apply-subst t) with
+      (type:int w _)                   -> (format "i" (int w))
+      (type:vec size t _)              -> (format "<" (int size) " x " (ftype t) ">")
+      ;; (type:ref (type:vec size t _) _) -> (format "[" (int size) " x " (ftype t) "]")
+      (type:ref t _)                   -> (format (ftype t) "*")
+      (type:none _)                    -> "void"
+      _                                -> (raise (:BadLLVMType (repr (type->sexp t))))
+      ))
+
   (define (cpsfun->llvm ofile tenv name rtype args exp)
 
     (let ((phimap (alist:nil))
@@ -67,14 +78,6 @@
                    (loop (list:cons (format (valref x0) ", %" (sym ksrc)) acc) rest)
                    (loop acc rest))
             )))
-
-      ;; format a type for llvm.
-      (define (ftype t)
-        (match (apply-subst t) with
-          (type:int w _)      -> (format "i" (int w))
-          (type:vec size t _) -> (format "<" (int size) " x " (ftype t) ">")
-          _              -> (raise (:BadLLVMType (repr (type->sexp t))))
-          ))
 
       ;; a reference is to either a name or a value (e.g. "%r3" or "7")
       (define valref
@@ -125,35 +128,76 @@
 
       (define (branch k xs blockname)
         ;; XXX what if |xs| > 1 ?
-        (match k with
-          (cvar:t 'halt) -> (oprintf "  ret " (valreft (first xs)) "\n")
-          (cvar:t k)     -> (oprintf "  br label %" (sym k) "\n")
+        (match k (var->type (first xs)) with
+          (cvar:t 'halt) (type:none _) -> (oprintf "  ret void\n")
+          (cvar:t 'halt) _             -> (oprintf "  ret " (valreft (first xs)) "\n")
+          (cvar:t k)     _             -> (oprintf "  br label %" (sym k) "\n")
           ))
 
-      (define icmp-alist
+      (define prim-alist
         (alist/make
-         ('=  "eq")
-         ('<> "ne")
-         ('>  "ugt")
-         ('>= "uge")
-         ('<  "ult")
-         ('<= "ule")
-         ;; for now, no signed arithmetic.
+         ('=    (prim-icmp "eq"))
+         ('<>   (prim-icmp "ne"))
+         ('>    (prim-icmp "ugt"))
+         ('>=   (prim-icmp "uge"))
+         ('<    (prim-icmp "ult"))
+         ('<=   (prim-icmp "ule"))
+         ('+    (prim-binop "add"))
+         ('-    (prim-binop "sub"))
+         ('*    (prim-binop "mul"))
+         ('/    (prim-binop "udiv"))
+         ('and  (prim-binop "and"))
+         ('or   (prim-binop "or"))
+         ('xor  (prim-binop "xor"))
+         ('ashr (prim-binop "ashr"))
+         ('<<   (prim-binop "shl"))
+         ('>>   (prim-binop "lshr"))
+         ('set!  prim-set!)
+         ('%vref prim-vref)
+         ('%get  prim-%get)
          ))
 
-      (define binop-alist
-        (alist/make
-         ('+    "add")
-         ('-    "sub")
-         ('*    "mul")
-         ('/    "udiv")
-         ('and  "and")
-         ('or   "or")
-         ('xor  "xor")
-         ('ashr "ashr")
-         ('<<   "shl")
-         ('>>   "lshr")
-         ))
+      (define (prim-binop op)
+        (lambda (r tr args)
+          (oprintf "  %" (sym r) " = " op " " (fargst args) "\n")))
+
+      (define (prim-icmp code)
+        (lambda (r tr args)
+          (oprintf "  %" (sym r) " = icmp " code " " (fargst args) "\n")))
+
+      (define (prim-set! r _ args)
+        (match args with
+          (dst src)
+          -> (oprintf "  store " (valreft src) ", " (valreft dst) "\n")
+          _
+          -> (imp)
+          ))
+
+      (define (prim-vref r tr args)
+        (match args with
+          ((var:t vec (type:ref tvec _)) index)
+          -> (match index with
+               (var:t ix (type:int isize _))
+               -> (oprintf "  %" (sym r) " = getelementptr "
+                           (ftype tvec) ", "
+                           (ftype tvec) "* %" (sym vec)
+                           ", i32 0, i" (int (if (= 0 isize) 32 isize)) " " (valref index) "\n"
+                           )
+               _ -> (imp))
+          _ -> (imp)
+          ))
+
+      (define (prim-%get r tr args)
+        (match args with
+          ((var:t p (type:ref tp _)))
+          -> (oprintf "  %" (sym r) " = load " (ftype tp) ", " (ftype tp) "* " (valref (first args)) "\n")
+          _
+          -> (imp)
+          ))
+
+      (define var->type
+        (var:t _ type) -> (apply-subst type)
+        )
 
       ;; format a set of args with one type, e.g. "i32 %a, %b"
       (define (fargst args)
