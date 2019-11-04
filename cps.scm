@@ -116,8 +116,11 @@
   (S cps)
   )
 
-;; this probably needs to be a map from name to type sig.
-(define prims (list '+ '- '* '/ 'and 'or 'xor '<< '>> 'ashr '= '<> '< '> '<= '>=))
+(define (alist/has-key? a k)
+  (match (alist/lookup a k) with
+    (maybe:yes _) -> #t
+    (maybe:no)    -> #f
+    ))
 
 ;; --------------
 ;; CPS conversion
