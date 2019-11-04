@@ -66,7 +66,7 @@
   (:bool bool)
   (:sym symbol)
   (:lit sexp)
-  (:wild)
+  (:wild sexp)
   (:opt (maybe zparse))
   (:list (list zparse))
   (:exp azexp)
@@ -353,6 +353,11 @@
     -> (zexp:call name (map zparse->exp args))
     _ -> (imp)
     )
+  (define m-prim
+    (zparse:list (_ (zparse:sym name) (zparse:wild param) (zparse:list args)))
+    -> (zexp:prim name (remove-annotations param) (map zparse->exp args))
+    _ -> (imp)
+    )
 
   (define m-let
     (zparse:list (_ (zparse:opt mloop) (zparse:list ((zparse:list binds))) (zparse:list exps)))
@@ -393,6 +398,7 @@
   ;;   (LET ((name exp) ...) exp ...)
   ;;   (LET name ((name exp) ...) exp ...)
   ;;   (APPK name exp ...)
+  ;;   (PRIM name sexp exp ...)
   ;;   (name exp ...)
 
   (fix
@@ -412,6 +418,7 @@
                  (zp-plus zp-exp*))
         ;; (mp-form 'set! m-set! qa-sym zp-exp*)
         (mp-form 'appk m-appk qa-sym (zp-star zp-exp*))
+        (mp-form 'prim m-prim qa-sym qa-wild (zp-star zp-exp*))
         (mapP m-call (zp-list qa-sym (zp-star zp-exp*)) 'm-app)
         ))))))
 

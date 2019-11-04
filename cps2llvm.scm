@@ -50,7 +50,7 @@
           (cps:appk (cvar:t k) xs)        -> (for-list-counting i x xs
                                                 (alist/push phimap (:tuple k i) (:tuple x blockname)))
           (cps:dead K)                    -> (pass1 K blockname)
-          (cps:prim name x vars K)        -> (pass1 K blockname)
+          (cps:prim name p x vars K)      -> (pass1 K blockname)
           (cps:app name k vars)           -> #u
           ))
 
@@ -116,8 +116,8 @@
           -> (branch k xs blockname)
           (cps:dead K)
           -> (emit K blockname)
-          (cps:prim name x vars K)
-          -> (begin (emit-prim name x vars) (emit K blockname))
+          (cps:prim name p x vars K)
+          -> (begin (emit-prim name p x vars) (emit K blockname))
           (cps:app name k vars)
           -> (raise (:LLVM/NotImplementedYet))
           )
@@ -165,22 +165,13 @@
           ))
 
       (define emit-prim
-        name (var:t x tx) args
-        -> (match (alist/lookup icmp-alist name) with
-             (maybe:yes code)
-             -> (oprintf "  %" (sym x) " = icmp " code " " (fargst args) "\n")
+        name param (var:t x tx) args
+        -> (match (alist/lookup prim-alist name) with
+             (maybe:yes fun)
+             -> (fun x tx args)
              (maybe:no)
-             -> (match (alist/lookup binop-alist name) with
-                  (maybe:yes op)
-                  -> (oprintf "  %" (sym x) " = " op " " (fargst args) "\n")
-                  (maybe:no)
-                  -> (match (alist/lookup tenv name) with
-                       (maybe:yes (type:arrow rtype argtypes _))
-                       -> (oprintf "  %" (sym x) " = call " (ftype rtype)
-                                   " @" (sym name) "(" (join valreft ", " args) ")\n")
-                       _
-                       -> (raise (:LLVM/NoSuchPrim (format (sym name))))
-                       ))))
+             -> (raise (:LLVM/NoSuchPrim (format (sym name))))
+             ))
 
       (define faztname
         (aztname:t name type src)

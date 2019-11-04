@@ -32,7 +32,7 @@
 ;; gaz expression
 (datatype zexp
   (:lit int)                         ;; value
-  (:prim symbol (list azexp))        ;; name args
+  (:prim symbol sexp (list azexp))   ;; name param args
   (:seq (list azexp))                ;; exp ...
   (:let aztname azexp azexp)         ;; name:type init body
   (:ref symbol)                      ;; name
@@ -95,9 +95,9 @@
 (define dump-zexp
   d (zexp:lit n)
   -> (printf "lit " (int n))
-  d (zexp:prim name exps)
+  d (zexp:prim name param exps)
   -> (begin
-       (printf "prim " (ansi cyan (sym name)))
+       (printf "prim " (ansi cyan (sym name)) (repr param))
        (for-list exp exps
          (dump-azexp (+ d 1) exp)))
   d (zexp:ref name)

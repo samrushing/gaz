@@ -85,18 +85,22 @@
       -> (raise (:TypeError (:UnknownContinuations k0 k1)))
       ))
 
+  (define var->type
+    (var:t x tx) -> (apply-subst tx)
+    )
+
   (define (S env exp)
     (match exp with
-      (cps:prim name (var:t x tx) xs K)
+      (cps:prim name param (var:t x tx) xs K)
       -> (match (alist/lookup prim-type-map name) with
            (maybe:yes fun)
-           -> (let ((txs (map var/type xs)))
+           -> (let ((txs (map var->type xs)))
                 (fun tx txs)
                 (S env K))
            (maybe:no)
            -> (match (alist/lookup tenv name) with
                 (maybe:yes (type:arrow rtype argtypes _))
-                -> (let ((txs (map var/type xs)))
+                -> (let ((txs (map var->type xs)))
                      (for-list2 a b txs argtypes
                        (unify a b))
                      (unify rtype tx)
@@ -134,7 +138,7 @@
     (var:t x tx) -> (var:t x (apply-subst tx))
     )
   (define A
-    (cps:prim name x xs K)   -> (cps:prim name (Av x) (map Av xs) (A K))
+    (cps:prim name p x xs K) -> (cps:prim name p (Av x) (map Av xs) (A K))
     (cps:letval x val K)     -> (cps:letval (Av x) val (A K))
     (cps:letcont k xs K0 K1) -> (cps:letcont k (map Av xs) (A K0) (A K1))
     (cps:appk k xs)          -> (cps:appk k (map Av xs))

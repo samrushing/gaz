@@ -51,13 +51,13 @@
 ;;   place to attach src annotation.
 
 (datatype cps
-  (:prim symbol var (list var) cps)  ;; x + y
-  (:letval var val cps)              ;; letval x = V in L
-  (:letcont cvar (list var) cps cps) ;; letcont k x0 x1 ... = K in L
-  (:appk cvar (list var))            ;; k x0 x1 ...
-  (:app symbol cvar (list var))      ;; f k x0 x1 ...
-  (:if var cvar cvar)                ;; if x k1 k2
-  (:dead cps)                        ;; K (for seq)
+  (:prim symbol sexp var (list var) cps) ;; x + y
+  (:letval var val cps)                  ;; letval x = V in L
+  (:letcont cvar (list var) cps cps)     ;; letcont k x0 x1 ... = K in L
+  (:appk cvar (list var))                ;; k x0 x1 ...
+  (:app symbol cvar (list var))          ;; f k x0 x1 ...
+  (:if var cvar cvar)                    ;; if x k1 k2
+  (:dead cps)                            ;; K (for seq)
   )
 
 (define (dump-cps d exp)
@@ -68,9 +68,9 @@
   (define fname n            -> (format (ansi cyan (sym n))))
   (printf (repeat d "  "))
   (match exp with
-    (cps:prim n x vars K)
+    (cps:prim n p x vars K)
     -> (begin
-         (printf "prim " (fvart x) " = " (fname n) " " (join fvar " " vars) "\n")
+         (printf "prim " (fvart x) " = " (fname n) " " (repr p) " " (join fvar " " vars) "\n")
          (dump-cps d K))
     (cps:letval x v K)
     -> (begin
@@ -99,7 +99,7 @@
   (define SCV
     (cvar:t name) -> (sexp (sym name)))
   (define S
-    (cps:prim n x vars k)    -> (sexp (sym 'prim) (sym n) (SV x)
+    (cps:prim n p x vars k)  -> (sexp (sym 'prim) (sym n) p (SV x)
                                       (list (map SV vars))
                                       (S k))
     (cps:letval x v k)       -> (sexp (sym 'letval) (SV x) (int v) (S k))
@@ -209,9 +209,10 @@
       -> (let ((x (newvar))
                (k (newcont)))
            (cps-args env args '()
-             (if (or (member-eq? name prims) (valid-funcall? name (length args)))
+                     (if (or (alist/has-key? prim-type-map name)
+                             (valid-funcall? name (length args)))
                  (lambda (vars)
-                   (cps:prim name x vars (K x)))
+                   (cps:prim name (sexp:bool #f) x vars (K x)))
                  (lambda (vars)
                    (cps:letcont
                     k (list x) (K x)
@@ -296,10 +297,11 @@
       (zexp:call name args)
       -> (cps-args
           env args '()
-          (if (or (member-eq? name prims) (valid-funcall? name (length args)))
+          (if (or (alist/has-key? prim-type-map name)
+                  (valid-funcall? name (length args)))
               (lambda (vars)
                 (let ((x (newvar)))
-                  (cps:prim name x vars (cps:appk k (list x)))))
+                  (cps:prim name (sexp:bool #f) x vars (cps:appk k (list x)))))
               (lambda (vars) (cps:app name k vars))))
       (zexp:let (aztname:t name type _) init body)
       -> (let ((j (newcont))

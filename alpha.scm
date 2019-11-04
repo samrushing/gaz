@@ -24,19 +24,19 @@
   ;; XXX do we need to pass src here?  how/where will we need it?  actually I think we
   ;;     should only need it where aztname exists?
   (define R
-    src env (zexp:lit n)          -> (zexp:lit n)
-    src env (zexp:prim name exps) -> (zexp:prim name (map (partial (RA env _)) exps))
-    src env (zexp:seq exps)       -> (zexp:seq (map (partial (RA env _)) exps))
-    src env (zexp:let nt i body)  -> (let (((nt0 env0) (extend env nt)))
+    src env (zexp:lit n)            -> (zexp:lit n)
+    src env (zexp:prim name p exps) -> (zexp:prim name p (map (partial (RA env _)) exps))
+    src env (zexp:seq exps)         -> (zexp:seq (map (partial (RA env _)) exps))
+    src env (zexp:let nt i body)    -> (let (((nt0 env0) (extend env nt)))
                                        (zexp:let nt0 (RA env i) (RA env0 body)))
-    src env (zexp:ref name)       -> (zexp:ref (lookup env name))
+    src env (zexp:ref name)         -> (zexp:ref (lookup env name))
     ;; src env (zexp:set name val)   -> (zexp:set (lookup env name) (RA env val))
-    src env (zexp:if t c a)       -> (zexp:if (RA env t) (RA env c) (RA env a))
-    src env (zexp:call name args) -> (zexp:call name (map (partial (RA env _)) args))
-    src env (zexp:loop k binds b) -> (let (((k0 env0) (extend env (aztname:t k (new-tvar) src)))
+    src env (zexp:if t c a)         -> (zexp:if (RA env t) (RA env c) (RA env a))
+    src env (zexp:call name args)   -> (zexp:call name (map (partial (RA env _)) args))
+    src env (zexp:loop k binds b)   -> (let (((k0 env0) (extend env (aztname:t k (new-tvar) src)))
                                            ((binds0 env1) (R-binds env0 (list:nil) binds)))
                                        (zexp:loop (aztname/name k0) binds0 (RA env1 b)))
-    src env (zexp:appk k args)    -> (zexp:appk (lookup env k) (map (partial (RA env _)) args))
+    src env (zexp:appk k args)      -> (zexp:appk (lookup env k) (map (partial (RA env _)) args))
     )
 
   (define gensym
