@@ -206,20 +206,27 @@
            (maybe:yes v) -> (K v)
            ;; XXX require declarations of external funs.
            (maybe:no) -> (K (var:t s (lookup-type s))))
+      (zexp:prim name param args)
+      -> (let ((x (newvar)))
+           (cps-args
+            env args '()
+            (lambda (vars)
+              (cps:prim name param x vars (K x)))))
       ;; (zexp:set name v)
       ;; -> (raise (:NotImplemented exp))
       (zexp:call name args)
       -> (let ((x (newvar))
                (k (newcont)))
-           (cps-args env args '()
-                     (if (or (alist/has-key? prim-type-map name)
-                             (valid-funcall? name (length args)))
-                 (lambda (vars)
-                   (cps:prim name (sexp:bool #f) x vars (K x)))
-                 (lambda (vars)
-                   (cps:letcont
-                    k (list x) (K x)
-                    (cps:app name k vars))))))
+           (cps-args
+            env args '()
+            (if (or (alist/has-key? prim-type-map name)
+                    (valid-funcall? name (length args)))
+                (lambda (vars)
+                  (cps:prim name (sexp:bool #f) x vars (K x)))
+                (lambda (vars)
+                  (cps:letcont
+                   k (list x) (K x)
+                   (cps:app name k vars))))))
       (zexp:seq exps)
       -> (let loop ((exps exps))
            (match exps with
@@ -256,8 +263,7 @@
                (k0 (newcont))
                (x0 (newvar)))
            (cps-args
-            (extend* env vars1)
-            inits '()
+            (extend* env vars1) inits '()
             (lambda (vars2)
               (cps:letcont
                kname vars1
@@ -267,8 +273,6 @@
                 (cps:appk kname vars2))))))
       (zexp:appk k xs)
       -> (raise (:NonTailAppK))
-      x
-      -> (raise (:NotYet x))
       )
     )
 
@@ -288,6 +292,12 @@
              (match (lookup-val env s) with
                (maybe:yes var) -> var
                (maybe:no) -> (var:t s (lookup-type s)))))
+      (zexp:prim name param args)
+      -> (let ((x (newvar)))
+           (cps-args
+            env args '()
+            (lambda (vars)
+              (cps:prim name param x vars (cps:appk k (list x))))))
       ;; (zexp:set s v)
       ;; -> (raise (:NotImplemented exp))
       (zexp:seq exps)
@@ -338,8 +348,6 @@
                (cps:appk kname vars2)))))
       (zexp:appk k vals)
       -> (cps-args env vals '() (lambda (vars) (cps:appk (cvar:t k) vars)))
-      x
-      -> (raise (:NotYet x))
       ))
 
   (cps-tail (alist:nil) exp (cvar:t 'halt))
