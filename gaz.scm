@@ -28,7 +28,7 @@
       (match (p.fun (list exp)) with
         (result:no src label err)
         -> (begin
-             (printf "unable to parser while reading " (repr label) "\n")
+             (printf (bold "parse fail") " while reading " (repr label) "\n")
              (printf "err = " err "\n")
              (printf " at " (string src.path) ":" (int src.line) ":" (int src.pos) "\n")
              (raise (:ParseFail)))
@@ -96,7 +96,8 @@
         (ztop:fun name formals body)
         -> (let ((tenv0 (formals->tenv tenv formals))
                  (cps0 (zexp->cps tenv0 body))
-                 (cps1 (rewrite-cps cps0))
+                 ;;(cps1 (rewrite-cps cps0))
+                 (cps1 cps0)
                  (rtype (new-tvar)))
              (printf "\ncps0:\n")
              (dump-cps 0 cps0)
