@@ -47,7 +47,7 @@
       (cps:letcont k xs t0 t1) -> (begin (census/take t0) (census/take t1))
       (cps:appk k xs)          -> (begin (ccount.add k) (for-each vcount.add xs))
       (cps:app f k args)       -> (begin (ccount.add k) (for-each vcount.add args))
-      (cps:prim n x args t)    -> (begin (for-each vcount.add args) (census/take t))
+      (cps:prim n p x args t)  -> (begin (for-each vcount.add args) (census/take t))
       (cps:if x k0 k1)         -> (begin (vcount.add x) (ccount.add k0) (ccount.add  k1))
       (cps:dead K)             -> (census/take K)
       )
@@ -115,12 +115,18 @@
 	       (let ((x0 (apply-vsubst S x)))
 		 (cps:letval x0 V (simp (extend-venv x0 V venv) cenv S L))))
         ;; DEAD-PRIM cps:prim also binds a value
-        (cps:prim n x args t)
-        -> (if (= (vcount.get x) 0)
+
+        ;; ===================================================================
+        ;; XXX need to know when a prim is for side-effect only, can we check
+        ;;   for dead continuation?? or do we just get rid of this altogether?
+        ;; ===================================================================
+
+        (cps:prim n p x args t)
+        -> (if #f ;; (= (vcount.get x) 0)
                (N 'dead-prim (simp venv cenv S t))
                (let ((x0 (apply-vsubst S x))
                      (args0 (map (partial (apply-vsubst S _)) args)))
-                 (cps:prim n x0 args0 (simp venv cenv S t))))
+                 (cps:prim n p x0 args0 (simp venv cenv S t))))
         ;; ETA-CONT
         (cps:letcont k xs0 (cps:appk j xs1) K)
         -> (let ((j2 (apply-csubst S j)))
