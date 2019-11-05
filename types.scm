@@ -9,18 +9,16 @@
 (typealias typerec {parent=(maybe type)})
 
 (defmacro typerec/new
-  (newtyperec) -> {parent=(maybe:no)}
+  (typerec/new) -> {parent=(maybe:no)}
   )
 
 (datatype type
+  (:none typerec)
   (:int int typerec)
   (:vec int type typerec)
   (:arrow type (list type) typerec)
   (:ref type typerec)
   (:var int typerec)
-  (:none typerec)
-  ;; I think we need this, too.
-  ;; (:bool bool typerec)
   )
 
 (define (type/int n)
@@ -61,6 +59,7 @@
 ;;  our only-unsigned positioning.
 
 ;; singleton base types
+(define i0   (type/int 0))
 (define i1   (type/int 1))
 (define i8   (type/int 8))
 (define i16  (type/int 16))
@@ -71,6 +70,7 @@
 (define none (type/none))
 
 (define type->sexp
+  (type:int 0 _)      -> (sexp:symbol 'i0)
   (type:int 1 _)      -> (sexp:symbol 'i1)
   (type:int 8 _)      -> (sexp:symbol 'i8)
   (type:int 16 _)     -> (sexp:symbol 'i16)
@@ -86,28 +86,29 @@
   (type:none _)       -> (sexp:symbol 'none)
   )
 
-(define parse-type
-  (sexp:symbol 'i1)   -> i1
-  (sexp:symbol 'i8)   -> i8
-  (sexp:symbol 'i16)  -> i16
-  (sexp:symbol 'i32)  -> i32
-  (sexp:symbol 'i64)  -> i64
-  (sexp:symbol 'i128) -> i128
-  (sexp:symbol 'i256) -> i256
-  (sexp:symbol 'none) -> none
-  ;; vector
-  (sexp:list ((sexp:symbol 'vec) (sexp:int size) type))
-  -> (type/vec size (parse-type type))
-  ;; reference
-  (sexp:list ((sexp:symbol 'ref) type))
-  -> (type/ref (parse-type type))
-  ;; type variable
-  (sexp:list ((sexp:symbol 'quote) (sexp:int i)))
-  -> (type/var i)
-  (sexp:list ((sexp:symbol 'arrow) rtype (sexp:list argtypes)))
-  -> (type/arrow (parse-type rtype) (map parse-type argtypes))
-  x -> (raise (:ParseTypeFailed x))
-  )
+;; (define parse-type
+;;   (sexp:symbol 'i0)   -> i0
+;;   (sexp:symbol 'i1)   -> i1
+;;   (sexp:symbol 'i8)   -> i8
+;;   (sexp:symbol 'i16)  -> i16
+;;   (sexp:symbol 'i32)  -> i32
+;;   (sexp:symbol 'i64)  -> i64
+;;   (sexp:symbol 'i128) -> i128
+;;   (sexp:symbol 'i256) -> i256
+;;   (sexp:symbol 'none) -> none
+;;   ;; vector
+;;   (sexp:list ((sexp:symbol 'vec) (sexp:int size) type))
+;;   -> (type/vec size (parse-type type))
+;;   ;; reference
+;;   (sexp:list ((sexp:symbol 'ref) type))
+;;   -> (type/ref (parse-type type))
+;;   ;; type variable
+;;   (sexp:list ((sexp:symbol 'quote) (sexp:int i)))
+;;   -> (type/var i)
+;;   (sexp:list ((sexp:symbol 'arrow) rtype (sexp:list argtypes)))
+;;   -> (type/arrow (parse-type rtype) (map parse-type argtypes))
+;;   x -> (raise (:ParseTypeFailed x))
+;;   )
 
 ;; follow the links to the ultimate parent of this type.
 (define (type-find t)
@@ -142,6 +143,7 @@
       ))
 
   ;; XXX I don't think we need this feature.
+  ;; YYY now I think we do. (see `vref`).
   (define U-int
     ;; allow t0 to unify with any other legit int.
     ;; [i.e. i0 acts like a type variable for integer size]
