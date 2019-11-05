@@ -287,6 +287,25 @@
   _ -> (imp)
   )
 
+(define (parse-type exp)
+  (let ((p-type (zp-type)))
+    (match (p-type.fun (list exp)) with
+      (result:ok src type rest)
+      -> (:tuple src (zparse->type type))
+      (result:fail src label err)
+      -> (begin
+           (printf (bold "failed to parse type") " while reading " (repr exp) "\n")
+           (printf " expected: " (repr label) "\n")
+           (printf " at " (string src.path) ":" (int src.line) ":" (int src.pos) "\n")
+           (raise (:ParseFail)))
+      (result:no src label err)
+      -> (begin
+           (printf (bold "failed to parse type") " while reading " (repr exp) "\n")
+           (printf " expected: " (repr label) "\n")
+           (printf " at " (string src.path) ":" (int src.line) ":" (int src.pos) "\n")
+           (raise (:ParseFail)))
+      )))
+
 ;; ----- parse-exp -----
 
 ;; note: also used by zp-defn.
@@ -355,7 +374,8 @@
     )
   (define m-prim
     (zparse:list (_ (zparse:sym name) (zparse:wild param) (zparse:list args)))
-    -> (zexp:prim name (remove-annotations param) (map zparse->exp args))
+    ;;-> (zexp:prim name (remove-annotations param) (map zparse->exp args))
+    -> (zexp:prim name param (map zparse->exp args))
     _ -> (imp)
     )
 
