@@ -28,7 +28,7 @@
 
 ;; verify all args are arith and the same. returns that type.
 (define sig-prim-arith
-  rtype args
+  param rtype args
   -> (begin
        (printf "U prim " (join ftype ", " args) " -> " (ftype rtype) "\n")
        (for-list arg args (unify rtype arg)))
@@ -36,20 +36,75 @@
 
 ;; verify all args are arith and the same.  returns i1.
 (define sig-prim-cmp
-  rtype (targ0 targ1)
+  param rtype (targ0 targ1)
   -> (begin (unify rtype i1) (unify targ0 targ1))
-  rtype targs
+  param rtype targs
   -> (raise (:TypeError (:Arity targs)))
   )
 
 (define sig-set!
-  rtype ((type:ref t0 _) t1)
+  param rtype ((type:ref t0 _) t1)
   -> (begin
        (unify t0 t1)
        (unify rtype none))
-  _ _
-  -> (raise (:TypeError (:NotRef )))
+  _ _ _
+  -> (raise (:TypeError (:NotRef)))
   )
+
+(define sig-%get
+  param rtype ((type:ref t0 _))
+  -> (unify t0 rtype)
+  _ _ _
+  -> (raise (:TypeError (:NotRef)))
+  )
+
+(define sig-vref
+  param rtype ((type:ref (type:vec size t0 _) _) tindex)
+  -> (begin
+       (unify tindex i0)
+       (unify (type/ref t0) rtype)
+       )
+  _ a b
+  -> (begin
+       (printf "args = " (join (lambda (x) (repr (type->sexp x))) ", " b)  "\n")
+       (raise (:TypeError (:Vref a b)))
+       )
+  )
+
+;; this could be replaced with a `sig-conversion` that covered all the LLVM conversion
+;;  operators including ptrtoint/inttoptr/fp/etc.
+(define (sig-change-size bigger?)
+  (lambda (param rtype args)
+    (match args with
+      ((type:int isize _))
+      -> (let (((src ptype) (parse-type param)))
+           (match ptype with
+             (type:int osize _)
+             -> (if ((if bigger? > <) osize isize)
+                    (unify rtype ptype)
+                    (raise (:TypeError (:Zext isize osize))))
+             _
+             -> (begin
+                  (printf "parsed " (repr param) " as " (repr (type->sexp ptype)) "\n")
+                  (raise (:TypeError (:BadType ptype)))
+                  )
+             ))
+      (itype)
+      -> (raise (:TypeError (:BadType itype)))
+      args
+      -> (raise (:TypeError (:Arity args)))
+      )))
+
+;; (prim alloca i64) => i64*
+
+(define sig-alloca
+  param rtype ()
+  -> (let (((src ptype) (parse-type param)))
+       (unify rtype (type/ref ptype)))
+  param rtype argtypes
+  -> (raise (:TypeError (:Arity argtypes)))
+  )
+
 
 (define prim-type-map
   (alist/make
@@ -70,10 +125,13 @@
    ('<=    sig-prim-cmp)
    ('>=    sig-prim-cmp)
    ('set!  sig-set!)
+   ('%vref sig-vref)
+   ('%get  sig-%get)
+   ('zext  (sig-change-size #t))
+   ('trunc (sig-change-size #f))
+   ('alloca sig-alloca)
    ))
 
-;; XXX consider rewriting <exp> with solved types, rather than
-;;   requiring users to apply-subst at all types.
 (define (solve tenv cenv exp)
 
   (define (UK env k0 k1)
@@ -95,7 +153,7 @@
       -> (match (alist/lookup prim-type-map name) with
            (maybe:yes fun)
            -> (let ((txs (map var->type xs)))
-                (fun tx txs)
+                (fun param tx txs)
                 (S env K))
            (maybe:no)
            -> (match (alist/lookup tenv name) with
@@ -110,13 +168,13 @@
       (cps:letval (var:t x tx) val K)
       -> (S env K) ;; probably not sufficient
       (cps:letcont (cvar:t k) xs K0 K1)
-      -> (let ((env0 (alist:entry k (map var/type xs) env)))
+      -> (let ((env0 (alist:entry k (map var->type xs) env)))
            (S env0 K0) ;; note: k is defined in the init because loop.
            (S env0 K1))
       (cps:appk (cvar:t k) xs)
       -> (match (alist/lookup env k) with
            (maybe:yes txs)
-           -> (for-list2 ta tb txs (map var/type xs)
+           -> (for-list2 ta tb txs (map var->type xs)
                 (unify ta tb))
            (maybe:no)
            -> (raise (:TypeError (:UnknownContinuation k))))
