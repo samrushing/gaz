@@ -97,7 +97,7 @@
   -> (printf "lit " (int n))
   d (zexp:prim name param exps)
   -> (begin
-       (printf "prim " (ansi cyan (sym name)) (repr param))
+       (printf "prim " (ansi cyan (sym name)) " " (repr param))
        (for-list exp exps
          (dump-azexp (+ d 1) exp)))
   d (zexp:ref name)
