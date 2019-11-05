@@ -136,36 +136,38 @@
 
       (define prim-alist
         (alist/make
-         ('=    (prim-icmp "eq"))
-         ('<>   (prim-icmp "ne"))
-         ('>    (prim-icmp "ugt"))
-         ('>=   (prim-icmp "uge"))
-         ('<    (prim-icmp "ult"))
-         ('<=   (prim-icmp "ule"))
-         ('+    (prim-binop "add"))
-         ('-    (prim-binop "sub"))
-         ('*    (prim-binop "mul"))
-         ('/    (prim-binop "udiv"))
-         ('and  (prim-binop "and"))
-         ('or   (prim-binop "or"))
-         ('xor  (prim-binop "xor"))
-         ('ashr (prim-binop "ashr"))
-         ('<<   (prim-binop "shl"))
-         ('>>   (prim-binop "lshr"))
-         ('set!  prim-set!)
-         ('%vref prim-vref)
-         ('%get  prim-%get)
+         ('=     (prim-icmp "eq"))
+         ('<>    (prim-icmp "ne"))
+         ('>     (prim-icmp "ugt"))
+         ('>=    (prim-icmp "uge"))
+         ('<     (prim-icmp "ult"))
+         ('<=    (prim-icmp "ule"))
+         ('+     (prim-binop "add"))
+         ('-     (prim-binop "sub"))
+         ('*     (prim-binop "mul"))
+         ('/     (prim-binop "udiv"))
+         ('and   (prim-binop "and"))
+         ('or    (prim-binop "or"))
+         ('xor   (prim-binop "xor"))
+         ('ashr  (prim-binop "ashr"))
+         ('<<    (prim-binop "shl"))
+         ('>>    (prim-binop "lshr"))
+         ('set!   prim-set!)
+         ('%vref  prim-vref)
+         ('%get   prim-%get)
+         ('zext   prim-zext)
+         ('alloca prim-alloca)
          ))
 
       (define (prim-binop op)
-        (lambda (r tr args)
+        (lambda (param r tr args)
           (oprintf "  %" (sym r) " = " op " " (fargst args) "\n")))
 
       (define (prim-icmp code)
-        (lambda (r tr args)
+        (lambda (param r tr args)
           (oprintf "  %" (sym r) " = icmp " code " " (fargst args) "\n")))
 
-      (define (prim-set! r _ args)
+      (define (prim-set! param r _ args)
         (match args with
           (dst src)
           -> (oprintf "  store " (valreft src) ", " (valreft dst) "\n")
@@ -173,7 +175,7 @@
           -> (imp)
           ))
 
-      (define (prim-vref r tr args)
+      (define (prim-vref param r tr args)
         (match args with
           ((var:t vec (type:ref tvec _)) index)
           -> (match index with
@@ -187,12 +189,26 @@
           _ -> (imp)
           ))
 
-      (define (prim-%get r tr args)
+      (define (prim-%get param r tr args)
         (match args with
           ((var:t p (type:ref tp _)))
           -> (oprintf "  %" (sym r) " = load " (ftype tp) ", " (ftype tp) "* " (valref (first args)) "\n")
           _
           -> (imp)
+          ))
+
+      (define (prim-zext param r tr args)
+        (match (parse-type param) with
+          (:tuple src (type:int osize _))
+          -> (oprintf "  %" (sym r) " = zext " (valreft (first args)) " to i" (int osize) "\n")
+          _
+          -> (imp)
+          ))
+
+      (define (prim-alloca param r tr args)
+        (match (parse-type param) with
+          (:tuple src type)
+          -> (oprintf "  %" (sym r) " = alloca " (ftype type) ", i32 1\n")
           ))
 
       (define var->type
@@ -212,7 +228,7 @@
         name param (var:t x tx) args
         -> (match (alist/lookup prim-alist name) with
              (maybe:yes fun)
-             -> (fun x tx args)
+             -> (fun param x tx args)
              (maybe:no)
              -> (raise (:LLVM/NoSuchPrim (format (sym name))))
              ))
