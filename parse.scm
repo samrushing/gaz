@@ -340,7 +340,7 @@
     (zparse:exp (azexp:t exp src)))
 
   (define m-int
-    (zparse:int n) -> (zexp:lit n)
+    (zparse:int n) -> (zexp:lit (zlit:int n))
     _ -> (imp)
     )
   (define m-var
@@ -445,6 +445,8 @@
 ;; ----- definitions -----
 ;; def ::=
 ;;   (DEFINE (name formal ...) exp ...)
+;; def ::=
+;;   (DEFINE name:type exp)
 
 (define m-tname
   (zparse:tname tname)
@@ -454,14 +456,34 @@
   )
 
 (define m-defn
-  (zparse:list (_ (zparse:list ((zparse:sym name) (zparse:list formals))) (zparse:list exps)))
-  -> (ztop:fun name (map m-tname formals) (m-body exps))
+  (zparse:list (_ (zparse:list ((zparse:list (name . formals)))) (zparse:list exps)))
+  -> (ztop:fun (m-tname name) (map m-tname formals) (m-body exps))
   _
   -> (imp)
   )
 
 (define (zp-defn)
-  (p-annotated (mp-form 'define m-defn (za-list qa-sym (zp-star zp-tname)) (zp-plus (zp-exp)))))
+  (p-annotated (mp-form 'define m-defn (za-list (zp-plus zp-tname)) (zp-plus (zp-exp))))
+  )
+
+(define sexp->zlit
+  (sexp:int n)       -> (zlit:int n)
+  (sexp:vector subs) -> (zlit:vec (map sexp->zlit subs))
+  other              -> (raise (:ParseFail))
+  )
+
+;; XXX or map-ann & create azlit
+(define m-defl
+  (zparse:list (_ (zparse:tname tname) (zparse:wild val)))
+  -> (ztop:lit tname (sexp->zlit (remove-annotations val)))
+  _
+  -> (imp)
+  )
+
+;; XXX bit of a cop-out using qa-wild for vector literals.
+(define (zp-defl)
+  (p-annotated (mp-form 'deflit m-defl zp-tname qa-wild))
+  )
 
 ;; ----- declarations -----
 
@@ -477,8 +499,29 @@
    (mp-form 'declare m-decl
             qa-sym (zp-star (zp-type)) (qa-litsym '->) (zp-type))))
 
+;; ----- macros -----
+
+(define unwild
+  (zparse:wild exp) -> exp
+  _ -> (imp)
+  )
+
+(define m-macro
+  src (zparse:list (_ (zparse:sym name) (zparse:list pairs)))
+  -> (ztop:mac name src (macro/parse (map unwild pairs)))
+  src _
+  -> (imp)
+  )
+
+(define (zp-macro)
+  (map-ann m-macro (pa-form 'defmacro qa-sym (zp-plus q-wild))))
+
+;; ----- all top-level objects -----
+
 (define (zp-top)
   (choice
    (zp-defn)
+   (zp-defl)
    (zp-decl)
+   (zp-macro)
    ))
