@@ -268,3 +268,19 @@ Thoughts:
   * to experiment, start with the type parser, since it shakes out most
     of the issues.
 
+
+MACROS
+------
+[Nov 2019]
+
+I've whipped mbe.scm into working shape.  I was about to add a macro-processing
+layer to gaz-as-it-exists, and I realize that there's no way for it to work
+without putting it _before_ the parsing phase.  i.e., today we take sexp->zexp
+as step one.  Once we've done that we can't use the mbe code at all.
+
+So I need to add a completely new pass, that's purely sexp->sexp, that happens
+before anything is fed to the parser combinator stuff.
+
+It's possible that a default set of macros could be leaned on to make
+the job of sexp->zexp easier - maybe to the point where we can go back
+to simple pattern-matching?
