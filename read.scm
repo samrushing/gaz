@@ -188,9 +188,18 @@
                        -> (sexp (sexp:symbol '%%obref) ob (sexp:symbol method))
                        ;; XXX note: maybe change to an %ann-otation.
 		       ;; object : type syntax
-		       ob type -> (sexp (sexp:symbol '%typed) ob type)))
+		       ob type -> (sexp (maybe-annotate (sexp:symbol '%typed))
+                                        (maybe-annotate ob)
+                                        type)
+		       ;;ob type -> (sexp (sexp:symbol '%typed) ob type)
+                       ))
 	    _   -> result
 	    ))))
+
+    (define (maybe-annotate exp)
+      (if annotate?
+          (sexp %ann (sexp src spath (int line) (int pos)) exp)
+          exp))
 
     (define (read-array-index)
       (next) ;; skip open-left-bracket
