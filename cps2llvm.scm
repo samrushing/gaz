@@ -15,10 +15,44 @@
 
 (defmacro oprintf
   (oprintf x ...)
-  -> (file/write ofile (format x ...))
+  -> (begin
+       (file/write ofile (format x ...))
+       ;; XXX DO NOT LEAVE THIS HERE
+       (file/flush ofile)
+       )
   )
 
-(define (compiled->llvm path tenv funs)
+(define (clean s)
+  (define safe? (char-class (cons #\_ (append letters digits))))
+  (define safe-map
+    (alist/make
+     (#\? "_question")
+     (#\* "_splat")
+     (#\+ "_plus")
+     (#\- "_dash")
+     (#\/ "_slash")
+     (#\< "_lt")
+     (#\> "_gt")
+     (#\^ "_up")
+     (#\& "_amp")
+     (#\% "_percent")
+     (#\@ "_at")
+     (#\! "_bang")
+     (#\~ "_tilde")
+     (#\` "_backtick")
+     (#\$ "_dolla")
+     ))
+  (define (replace ch)
+    (match (alist/lookup safe-map ch) with
+      (maybe:yes r) -> r
+      (maybe:no)    -> (char->string ch)
+      ))
+  (let ((s (string->list s)))
+    (if (all? safe? s)
+        (list->string s)
+        (string-concat (map replace s)))))
+
+(define (compiled->llvm path tenv funs lits)
 
   (define (make-opath path)
     (let ((parts (string-split path #\.)))
@@ -31,230 +65,338 @@
         -> (raise (:EmptyPath?))
         )))
 
-  ;; format a type for llvm.
-  (define (ftype t)
-    (match (apply-subst t) with
-      (type:int w _)                   -> (format "i" (int w))
-      (type:vec size t _)              -> (format "<" (int size) " x " (ftype t) ">")
-      ;; (type:ref (type:vec size t _) _) -> (format "[" (int size) " x " (ftype t) "]")
-      (type:ref t _)                   -> (format (ftype t) "*")
-      (type:none _)                    -> "void"
-      _                                -> (raise (:BadLLVMType (repr (type->sexp t))))
-      ))
-
-  (define (cpsfun->llvm ofile tenv name rtype args exp)
-
-    (let ((phimap (alist:nil))
-          (venv (alist:nil)))
-
-      (define gensym
-        (let ((counter 0))
-          (lambda ()
-            (inc! counter)
-            (string->symbol (format "r" (int counter))))))
-
-      (define (pass1 exp blockname)
-        (match exp with
-          (cps:letval (var:t x tx) V K)   -> (begin (alist/push venv x (:tuple tx V)) (pass1 K blockname))
-          (cps:letcont (cvar:t k) xs K L) -> (begin (pass1 L blockname) (pass1 K k))
-          (cps:if x k1 k2)                -> #u
-          (cps:appk (cvar:t k) xs)        -> (for-list-counting i x xs
-                                                (alist/push phimap (:tuple k i) (:tuple x blockname)))
-          (cps:dead K)                    -> (pass1 K blockname)
-          (cps:prim name p x vars K)      -> (pass1 K blockname)
-          (cps:app name k vars)           -> #u
-          ))
-
-      (define (emit-phi blockname x idx)
-        (let loop ((acc (list:nil))
-                   (phimap phimap))
-          (match phimap with
-            (alist:nil)
-            -> (when (> (length acc) 0)
-                 (oprintf "  %" (sym (var/name x)) " = phi " (ftype (var/type x))
-                          " [ " (join " ], [ " acc) " ]\n"))
-            (alist:entry (:tuple ktrg idx0) (:tuple x0 ksrc) rest)
-            -> (if (and (eq? ktrg blockname) (= idx idx0))
-                   (loop (list:cons (format (valref x0) ", %" (sym ksrc)) acc) rest)
-                   (loop acc rest))
-            )))
-
-      ;; a reference is to either a name or a value (e.g. "%r3" or "7")
-      (define valref
-        (var:t x tx)
-        -> (match (alist/lookup venv x) with
-             (maybe:yes (:tuple tv v)) -> (format (int v))
-             (maybe:no)                -> (format "%" (sym x))
-             ))
-
-      ;; same thing, but with the type as a prefix (e.g. "i64 %r2")
-      (define valreft
-        (var:t x tx)
-        -> (match (alist/lookup venv x) with
-             ;; XXX assert tv == tx?
-             (maybe:yes (:tuple tv v)) -> (format (ftype tv) " " (int v))
-             (maybe:no)                -> (format (ftype tx) " %" (sym x))
-             ))
-
-      (define fcont
-        (cvar:t name) -> (format (sym name))
-        )
-
-      (define (emit exp blockname)
-        (match exp with
-          (cps:letval x V K)
-          -> (emit K blockname)
-          (cps:letcont (cvar:t k) xs K L)
-          -> (begin
-               (emit L blockname)
-               ;; note: L is the init, and is in the current block
-               (oprintf "\n" (sym k) ":\n") ;; label
-               (for-list-counting i x xs
-                                  (emit-phi k x i))
-               (emit K k) ;; with new blockname
-               )
-          (cps:if x k1 k2)
-          -> (oprintf "  switch " (valreft x) ", label %" (fcont k1) " [i1 0, label %" (fcont k2) "]\n")
-          (cps:appk k xs)
-          -> (branch k xs blockname)
-          (cps:dead K)
-          -> (emit K blockname)
-          (cps:prim name p x vars K)
-          -> (begin (emit-prim name p x vars) (emit K blockname))
-          (cps:app name k vars)
-          -> (raise (:LLVM/NotImplementedYet))
-          )
-        )
-
-      (define (branch k xs blockname)
-        ;; XXX what if |xs| > 1 ?
-        (match k (var->type (first xs)) with
-          (cvar:t 'halt) (type:none _) -> (oprintf "  ret void\n")
-          (cvar:t 'halt) _             -> (oprintf "  ret " (valreft (first xs)) "\n")
-          (cvar:t k)     _             -> (oprintf "  br label %" (sym k) "\n")
-          ))
-
-      (define prim-alist
-        (alist/make
-         ('=     (prim-icmp "eq"))
-         ('<>    (prim-icmp "ne"))
-         ('>     (prim-icmp "ugt"))
-         ('>=    (prim-icmp "uge"))
-         ('<     (prim-icmp "ult"))
-         ('<=    (prim-icmp "ule"))
-         ('+     (prim-binop "add"))
-         ('-     (prim-binop "sub"))
-         ('*     (prim-binop "mul"))
-         ('/     (prim-binop "udiv"))
-         ('and   (prim-binop "and"))
-         ('or    (prim-binop "or"))
-         ('xor   (prim-binop "xor"))
-         ('ashr  (prim-binop "ashr"))
-         ('<<    (prim-binop "shl"))
-         ('>>    (prim-binop "lshr"))
-         ('set!   prim-set!)
-         ('%vref  prim-vref)
-         ('%get   prim-%get)
-         ('zext   prim-zext)
-         ('alloca prim-alloca)
-         ))
-
-      (define (prim-binop op)
-        (lambda (param r tr args)
-          (oprintf "  %" (sym r) " = " op " " (fargst args) "\n")))
-
-      (define (prim-icmp code)
-        (lambda (param r tr args)
-          (oprintf "  %" (sym r) " = icmp " code " " (fargst args) "\n")))
-
-      (define (prim-set! param r _ args)
-        (match args with
-          (dst src)
-          -> (oprintf "  store " (valreft src) ", " (valreft dst) "\n")
-          _
-          -> (imp)
-          ))
-
-      (define (prim-vref param r tr args)
-        (match args with
-          ((var:t vec (type:ref tvec _)) index)
-          -> (match index with
-               (var:t ix (type:int isize _))
-               -> (oprintf "  %" (sym r) " = getelementptr "
-                           (ftype tvec) ", "
-                           (ftype tvec) "* %" (sym vec)
-                           ", i32 0, i" (int (if (= 0 isize) 32 isize)) " " (valref index) "\n"
-                           )
-               _ -> (imp))
-          _ -> (imp)
-          ))
-
-      (define (prim-%get param r tr args)
-        (match args with
-          ((var:t p (type:ref tp _)))
-          -> (oprintf "  %" (sym r) " = load " (ftype tp) ", " (ftype tp) "* " (valref (first args)) "\n")
-          _
-          -> (imp)
-          ))
-
-      (define (prim-zext param r tr args)
-        (match (parse-type param) with
-          (:tuple src (type:int osize _))
-          -> (oprintf "  %" (sym r) " = zext " (valreft (first args)) " to i" (int osize) "\n")
-          _
-          -> (imp)
-          ))
-
-      (define (prim-alloca param r tr args)
-        (match (parse-type param) with
-          (:tuple src type)
-          -> (oprintf "  %" (sym r) " = alloca " (ftype type) ", i32 1\n")
-          ))
-
-      (define var->type
-        (var:t _ type) -> (apply-subst type)
-        )
-
-      ;; format a set of args with one type, e.g. "i32 %a, %b"
-      (define (fargst args)
-        (match args with
-          ((var:t a ta) . tl)
-          -> (format (ftype ta) " " (join valref ", " args))
-          ()
-          -> (raise (:LLVM/EmptyArgs))
-          ))
-
-      (define emit-prim
-        name param (var:t x tx) args
-        -> (match (alist/lookup prim-alist name) with
-             (maybe:yes fun)
-             -> (fun param x tx args)
-             (maybe:no)
-             -> (raise (:LLVM/NoSuchPrim (format (sym name))))
-             ))
-
-      (define faztname
-        (aztname:t name type src)
-        -> (format (ftype type) " %" (sym name))
-        )
-
-      (oprintf "define " (ftype rtype) " @" (sym name) " (" (join faztname ", " args) ") {\n")
-      (oprintf "top:\n")
-      (pass1 exp 'top)
-      (emit exp 'top)
-      (oprintf "}\n")
-      )
-    )
-
   (let ((opath (make-opath path))
-        (ofile (file/open-write opath #t #o644)))
+        (ofile (file/open-write opath #t #o644))
+        ;; decls for type-variant intrinsics.
+        (decls (cmap/make string-cmp))
+        (names (tree/empty))
+        (local '()))
+
+    ;; format a type for llvm.
+    (define (ftype t)
+      (match (apply-subst t) with
+        (type:int w)      -> (format "i" (int w))
+        (type:vec size t) -> (format "[" (int size) " x " (ftype t) "]")
+        (type:ref t)      -> (format (ftype t) "*")
+        (type:none)       -> "void"
+        _                 -> (raise (:BadLLVMType (repr (type->sexp t))))
+        ))
+
+    (define (safe name)
+      (match (tree/member names symbol-index-cmp name) with
+        (maybe:yes val) -> val
+        (maybe:no)
+        -> (let ((name0 (clean (symbol->string name))))
+             (tree/insert! names symbol-index-cmp name name0)
+             name0)
+        ))
+
+    (define (cpsfun->llvm ofile tenv name rtype args exp)
+
+      (let ((phimap (alist:nil))
+            (venv (alist:nil)))
+
+        (define gensym
+          (let ((counter 0))
+            (lambda ()
+              (inc! counter)
+              (string->symbol (format "r" (int counter))))))
+
+        (define (pass1 exp blockname)
+          (match exp with
+            (cps:letval (var:t x tx) V K)   -> (begin (alist/push venv x (:tuple tx V)) (pass1 K blockname))
+            (cps:letcont (cvar:t k) xs K L) -> (begin (pass1 L blockname) (pass1 K k))
+            (cps:if x k1 k2)                -> #u
+            (cps:appk (cvar:t k) xs)        -> (for-list-counting i x xs
+                                                 (alist/push phimap (:tuple k i) (:tuple x blockname)))
+            (cps:dead K)                    -> (pass1 K blockname)
+            (cps:prim name p x vars K)      -> (pass1 K blockname)
+            (cps:app name k vars)           -> #u
+            ))
+
+        (define (emit-phi blockname x idx)
+          (let loop ((acc (list:nil))
+                     (phimap phimap))
+            (match phimap with
+              (alist:nil)
+              -> (when (> (length acc) 0)
+                   (oprintf "  %" (safe (var/name x)) " = phi " (ftype (var/type x))
+                            " [ " (join " ], [ " acc) " ]\n"))
+              (alist:entry (:tuple ktrg idx0) (:tuple x0 ksrc) rest)
+              -> (if (and (eq? ktrg blockname) (= idx idx0))
+                     (loop (list:cons (format (valref x0) ", %" (safe ksrc)) acc) rest)
+                     (loop acc rest))
+              )))
+
+        ;; a reference is to either a name or a value (e.g. "%r3" or "7")
+        (define valref
+          (var:t x tx)
+          -> (match (alist/lookup venv x) with
+               (maybe:yes (:tuple tv v)) -> (format (int v))
+               (maybe:no)
+               -> (match (alist/lookup tenv x) with
+                    (maybe:yes _) -> (format "@" (safe x))
+                    (maybe:no)    -> (format "%" (safe x))
+                    )))
+
+        ;; same thing, but with the type as a prefix (e.g. "i64 %r2")
+        (define valreft
+          (var:t x tx)
+          -> (match (alist/lookup venv x) with
+               ;; XXX assert tv == tx?
+               (maybe:yes (:tuple tv v)) -> (format (ftype tv) " " (int v))
+               (maybe:no)
+               -> (match (alist/lookup tenv x) with
+                    (maybe:yes _) -> (format (ftype tx) " @" (safe x))
+                    (maybe:no)    -> (format (ftype tx) " %" (safe x))
+                    )
+               ))
+
+        (define fcont
+          (cvar:t name) -> (format (safe name))
+          )
+
+        (define (emit exp blockname)
+          (match exp with
+            (cps:letval x V K)
+            -> (emit K blockname)
+            (cps:letcont (cvar:t k) xs K L)
+            -> (begin
+                 (emit L blockname)
+                 ;; note: L is the init, and is in the current block
+                 (oprintf "\n" (safe k) ":\n") ;; label
+                 (for-list-counting i x xs
+                                    (emit-phi k x i))
+                 (emit K k) ;; with new blockname
+                 )
+            (cps:if x k1 k2)
+            -> (oprintf "  switch " (valreft x) ", label %" (fcont k1) " [i1 0, label %" (fcont k2) "]\n")
+            (cps:appk k xs)
+            -> (branch k xs blockname)
+            (cps:dead K)
+            -> (emit K blockname)
+            (cps:prim name p x vars K)
+            -> (begin (emit-prim name p x vars) (emit K blockname))
+            (cps:app name k vars)
+            -> (raise (:LLVM/NotImplementedYet))
+            )
+          )
+
+        (define (branch k xs blockname)
+          ;; XXX what if |xs| > 1 ?
+          (match k with
+            (cvar:t 'halt)
+            -> (match (var->type (first xs)) with
+                 (type:none) -> (oprintf "  ret void\n")
+                 _           -> (oprintf "  ret " (valreft (first xs)) "\n")
+                 )
+            (cvar:t k)
+            -> (oprintf "  br label %" (safe k) "\n")
+            ))
+
+        (define prim-alist
+          (alist/make
+           ('=     (prim-icmp "eq"))
+           ('<>    (prim-icmp "ne"))
+           ('>     (prim-icmp "ugt"))
+           ('>=    (prim-icmp "uge"))
+           ('<     (prim-icmp "ult"))
+           ('<=    (prim-icmp "ule"))
+           ('+     (prim-binop "add"))
+           ('-     (prim-binop "sub"))
+           ('*     (prim-binop "mul"))
+           ('/     (prim-binop "udiv"))
+           ('rem   (prim-binop "urem"))
+           ;; I think these need c-style names in order to avoid
+           ;;   the obvious conflict with logical and/or/not.
+           ('and   (prim-binop "and"))
+           ('or    (prim-binop "or"))
+           ('xor   (prim-binop "xor"))
+           ('ashr  (prim-binop "ashr"))
+           ('<<    (prim-binop "shl"))
+           ('>>    (prim-binop "lshr"))
+           ;; XXX these could become macros over a funnel-shift prim
+           ('>>>   (prim-rotate #t))
+           ('<<<   (prim-rotate #f))
+           ('%set!  prim-set!)
+           ('%vref  prim-vref)
+           ('%get   prim-%get)
+           ('zext   prim-zext)
+           ('trunc  prim-trunc)
+           ('alloca prim-alloca)
+           ))
+
+        (define (prim-binop op)
+          (lambda (param r tr args)
+            (oprintf "  %" (safe r) " = " op " " (fargst args) "\n")))
+
+        (define (prim-icmp code)
+          (lambda (param r tr args)
+            (oprintf "  %" (safe r) " = icmp " code " " (fargst args) "\n")))
+
+        (define (prim-set! param r _ args)
+          (match args with
+            (dst src)
+            -> (oprintf "  store " (valreft src) ", " (valreft dst) "\n")
+            _
+            -> (imp)
+            ))
+
+        (define (prim-vref param r tr args)
+          (match args with
+            ((var:t vec (type:ref tvec)) index)
+            -> (match index with
+                 (var:t ix (type:int isize))
+                 -> (oprintf "  %" (safe r) " = getelementptr "
+                             (ftype tvec) ", "
+                             ;;(ftype tvec) "* %" (safe vec)
+                             (valreft (first args))
+                             ", i32 0, i" (int (if (= 0 isize) 32 isize)) " " (valref index) "\n"
+                             )
+                 _ -> (imp))
+            _ -> (imp)
+            ))
+
+        (define (prim-%get param r tr args)
+          (match args with
+            ((var:t p (type:ref tp)))
+            -> (oprintf "  %" (safe r) " = load " (ftype tp) ", " (ftype tp) "* " (valref (first args)) "\n")
+            _
+            -> (imp)
+            ))
+
+        (define (prim-zext param r tr args)
+          (match (parse-type param) with
+            (type:int osize)
+            -> (oprintf "  %" (safe r) " = zext " (valreft (first args)) " to i" (int osize) "\n")
+            _
+            -> (imp)
+            ))
+
+        (define (prim-trunc param r tr args)
+          (match (parse-type param) with
+            (type:int osize)
+            -> (oprintf "  %" (safe r) " = trunc " (valreft (first args)) " to i" (int osize) "\n")
+            _
+            -> (imp)
+            ))
+
+        (define (prim-alloca param r tr args)
+          (match (parse-type param) args with
+            type ()
+            -> (oprintf "  %" (safe r) " = alloca " (ftype type) ", i32 1\n")
+            ;; XXX probably not.
+            type (n)
+            -> (oprintf "  %" (safe r) " = alloca " (ftype type) ", " (valreft n) "\n")
+            _ _
+            -> (imp)
+            ))
+
+        (define (add-rotate-decl t right?)
+          (let ((ft (ftype t)))
+            (cmap/add
+             decls
+             (format "declare " ft "@llvm.fsh" (if right? "r." "l.")
+                     ft " (" ft ", " ft ", " ft ")"))))
+
+        (define (prim-rotate right?)
+          (lambda (param r tr args)
+            (add-rotate-decl tr right?)
+            (oprintf "  %" (safe r) " = call " (ftype tr) " @llvm."
+                     (if right? "fshr" "fshl") "." (ftype tr) " ("
+                     ;; first argument twice.
+                     (join valreft ", " (list:cons (first args) args)) ")\n")))
+
+        (define var->type
+          (var:t _ type) -> (apply-subst type)
+          )
+
+        (define void?
+          (type:none) -> #t
+          _           -> #f
+          )
+
+        ;; format a set of args with one type, e.g. "i32 %a, %b"
+        (define (fargst args)
+          (match args with
+            ((var:t a ta) . tl)
+            -> (format (ftype ta) " " (join valref ", " args))
+            ()
+            -> (raise (:LLVM/EmptyArgs))
+            ))
+
+        (define emit-prim
+          name param (var:t x tx) args
+          -> (match (alist/lookup prim-alist name) with
+               (maybe:yes fun)
+               -> (fun param x tx args)
+               (maybe:no)
+               -> (match (alist/lookup tenv name) with
+                    (maybe:yes (type:arrow rtype argtypes))
+                    -> (oprintf "  " (if (void? rtype) "" (format "%" (safe x) " = "))
+                                "call " (ftype rtype) " @" (safe name)
+                                " (" (join valreft ", " args) ")\n")
+                    (maybe:yes ftype)
+                    -> (raise (:LLVM/BadCallType (format (repr (type->sexp ftype)))))
+                    (maybe:no)
+                    -> (raise (:LLVM/NoSuchPrim (format (sym name))))
+                    )
+               )
+          )
+
+        (define faztname
+          (aztname:t name type src)
+          -> (format (ftype type) " %" (safe name))
+          )
+
+        (oprintf "define " (ftype rtype) " @" (safe name) " (" (join faztname ", " args) ") {\n")
+        (oprintf "top:\n")
+        (pass1 exp 'top)
+        (emit exp 'top)
+        (oprintf "}\n")
+        )
+      )
+
+    (define (format-lit ty lit)
+      (match ty lit with
+        (type:int size) (zlit:int n)
+        -> (format (ftype ty) " " (int n))
+        (type:vec size ty0) (zlit:vec subs)
+        -> (if (= size (length subs))
+               (format "[" (int size) " x " (ftype ty0) "] ["
+                       (join (partial (format-lit ty0 _)) ", " subs) "]")
+               (raise (:BadLit lit)))
+        ty vec
+        -> (raise (:BadLit lit))
+        ))
+
+    ;; collect names of defined functions
+    (for-list fun funs
+      (match fun with
+        (:tuple name _ _ _)
+        -> (push! local name)
+        ))
+    (for-list lit lits
+      (match lit with
+        (:tuple name _ _)
+        -> (push! local name)))
     ;; emit declarations first
     (for-alist name type tenv
-      (match type with
-        (type:arrow rtype argtypes _)
-        -> (oprintf "declare " (ftype rtype) " @" (sym name) "(" (join ftype ", " argtypes) ")\n")
-        _
-        -> (raise (:UnexpectedDeclaration (repr (type->sexp type))))
+      (when (not (member-eq? name local))
+        (match type with
+          (type:arrow rtype argtypes)
+          -> (oprintf "declare " (ftype rtype) " @" (safe name) "(" (join ftype ", " argtypes) ")\n")
+          _ ;; a literal
+          -> (oprintf "declare " (ftype type) " @" (safe name) "\n")
+          )))
+    ;; emit lits
+    (for-list lit lits
+      (match lit with
+        (:tuple name type val)
+        ;; @x = global [4 x i32] [i32 1, i32 2, i32 3, i32 4], align 16
+        -> (oprintf "@" (safe name) " = global " (format-lit type val) "\n")
+        ;; (:tuple name type other)
+        ;; -> (raise (:NotYetImplemented))
         ))
     ;; emit functions
     (for-list fun funs
@@ -262,6 +404,9 @@
         (:tuple name rtype formals cps)
         -> (cpsfun->llvm ofile tenv name rtype formals cps)
         ))
+    ;; emit intrinsic decls
+    (for-map k v decls.map
+      (oprintf k "\n"))
     (file/flush ofile)
     (file/close ofile)
     ))
