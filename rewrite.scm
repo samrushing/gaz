@@ -52,16 +52,8 @@
       (cps:dead K)             -> (census/take K)
       )
 
-
-    (define apply-vsubst
-      S (var:t x ty) -> (var:t (apply-subst S x) ty)
-      )
-    (define apply-csubst
-      S (cvar:t k) -> (cvar:t (apply-subst S k))
-      )
-
-    (define (apply-subst S x)
-      (match (tree/member S symbol-index-cmp x) with
+    (define (apply-subst S cmp x)
+      (match (tree/member S cmp x) with
 	(maybe:no)    -> x
 	(maybe:yes y) -> y
 	))
@@ -72,15 +64,12 @@
       a b                 -> #f
       )
 
-    (define (extend-subst S k v)
-      (tree/insert S symbol-index-cmp k v))
-
-    (define extend-vsubst
-      S (var:t k _) (var:t v _) -> (extend-subst S k v)
-      )
-    (define extend-csubst
-      S (cvar:t k) (cvar:t v) -> (extend-subst S k v)
-      )
+    (define var-cmp (var:t a _) (var:t b _) -> (symbol-index-cmp a b))
+    (define cvar-cmp (cvar:t a) (cvar:t b) -> (symbol-index-cmp a b))
+    (define apply-vsubst (:tuple Sv Sk) x -> (apply-subst Sv var-cmp x))
+    (define apply-csubst (:tuple Sv Sk) k -> (apply-subst Sk cvar-cmp k))
+    (define extend-vsubst (:tuple Sv Sk) k v -> (:tuple (tree/insert Sv var-cmp k v) Sk))
+    (define extend-csubst (:tuple Sv Sk) k v -> (:tuple Sv (tree/insert Sk cvar-cmp k v)))
     (define (extend-vsubst* S ks vs)
       (match ks vs with
         () ()
@@ -103,8 +92,8 @@
       (define (N s e)
 	;; notify that a pass has a hit
         (inc! nopt)
-	(printf (sym s) " " (cps-repr K) "\n")
-	(printf "  : " (cps-repr e) "\n")
+	;; (printf (sym s) " " (cps-repr K) "\n")
+	;; (printf "  : " (cps-repr e) "\n")
 	e)
 
       (match K with
@@ -194,9 +183,11 @@
       (printf "vcount:\n") (vcount.dump fvar)
       (printf "ccount:\n") (ccount.dump fcvar)
       ;;(printf (int n) " " (cps-repr exp) "\n")
-      (printf (int n) "\n")
-      (dump-cps 1 exp)
-      (let ((exp0 (simp (alist:nil) (alist:nil) (tree/empty) exp)))
+      ;; (printf (int n) "\n")
+      ;; (dump-cps 1 exp)
+      (let ((exp0 (simp (alist:nil) (alist:nil)
+                        (:tuple (tree/empty) (tree/empty))
+                        exp)))
         (if (or (= nopt 0) (= n 0))
 	    exp
 	    (loop (- n 1) exp0)))
