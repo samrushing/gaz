@@ -4,7 +4,7 @@
 (require "lib/cmap.scm")
 (require "lib/partial.scm")
 (require "./read.scm")
-(require "./mbe.scm")
+(require "./macros.scm")
 (require "./parse.scm")
 (require "./zexp.scm")
 (require "./types.scm")
