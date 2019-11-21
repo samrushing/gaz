@@ -7,9 +7,9 @@
 
 ;; is this type suitable for arithmetic ops?
 (define arith?
-  (type:int _ _)                -> #t
-  (type:vec _ (type:int _ _) _) -> #t
-  _                             -> #f
+  (type:int _)              -> #t
+  (type:vec _ (type:int _)) -> #t
+  _                         -> #f
   )
 
 ;; NOTE: these schemes don't capture the need for int/vec types.
@@ -30,7 +30,7 @@
 (define sig-prim-arith
   param rtype args
   -> (begin
-       (printf "U prim " (join ftype ", " args) " -> " (ftype rtype) "\n")
+       ;;(printf "U arith (" (join ftype ", " args) ") -> " (ftype rtype) "\n")
        (for-list arg args (unify rtype arg)))
   )
 
@@ -43,23 +43,23 @@
   )
 
 (define sig-set!
-  param rtype ((type:ref t0 _) t1)
+  param rtype ((type:ref t0) t1)
   -> (begin
        (unify t0 t1)
        (unify rtype none))
   _ _ _
-  -> (raise (:TypeError (:NotRef)))
+  -> (raise (:TypeErrorBlah (:NotRef)))
   )
 
 (define sig-%get
-  param rtype ((type:ref t0 _))
+  param rtype ((type:ref t0))
   -> (unify t0 rtype)
   _ _ _
   -> (raise (:TypeError (:NotRef)))
   )
 
 (define sig-vref
-  param rtype ((type:ref (type:vec size t0 _) _) tindex)
+  param rtype ((type:ref (type:vec size t0)) tindex)
   -> (begin
        (unify tindex i0)
        (unify (type/ref t0) rtype)
@@ -76,10 +76,10 @@
 (define (sig-change-size bigger?)
   (lambda (param rtype args)
     (match args with
-      ((type:int isize _))
-      -> (let (((src ptype) (parse-type param)))
+      ((type:int isize))
+      -> (let ((ptype (parse-type param)))
            (match ptype with
-             (type:int osize _)
+             (type:int osize)
              -> (if ((if bigger? > <) osize isize)
                     (unify rtype ptype)
                     (raise (:TypeError (:Zext isize osize))))
@@ -99,12 +99,16 @@
 
 (define sig-alloca
   param rtype ()
-  -> (let (((src ptype) (parse-type param)))
+  -> (let ((ptype (parse-type param)))
        (unify rtype (type/ref ptype)))
+  ;; XXX probably not
+  param rtype (n)
+  -> (let ((ptype (parse-type param)))
+       (unify rtype (type/ref ptype))
+       (unify n i32))
   param rtype argtypes
   -> (raise (:TypeError (:Arity argtypes)))
   )
-
 
 (define prim-type-map
   (alist/make
@@ -112,19 +116,22 @@
    ('-     sig-prim-arith)
    ('*     sig-prim-arith)
    ('/     sig-prim-arith)
+   ('rem   sig-prim-arith)
    ('and   sig-prim-arith)
    ('or    sig-prim-arith)
    ('xor   sig-prim-arith)
    ('<<    sig-prim-arith)
    ('>>    sig-prim-arith)
    ('ashr  sig-prim-arith)
+   ('<<<   sig-prim-arith)
+   ('>>>   sig-prim-arith)
    ('=     sig-prim-cmp)
    ('<>    sig-prim-cmp)
    ('<     sig-prim-cmp)
    ('>     sig-prim-cmp)
    ('<=    sig-prim-cmp)
    ('>=    sig-prim-cmp)
-   ('set!  sig-set!)
+   ('%set! sig-set!)
    ('%vref sig-vref)
    ('%get  sig-%get)
    ('zext  (sig-change-size #t))
@@ -135,6 +142,7 @@
 (define (solve tenv cenv exp)
 
   (define (UK env k0 k1)
+    ;; (printf "UK\n")
     (match (alist/lookup env k0) (alist/lookup env k1) with
       (maybe:yes txs) (maybe:yes tys)
       -> (for-list2 tx ty txs tys
@@ -147,24 +155,33 @@
     (var:t x tx) -> (apply-subst tx)
     )
 
+  (define fvart
+    (var:t x tx) -> (format (sym x) ":" (type-repr tx))
+    )
+
   (define (S env exp)
+    ;;(printf "S:\n")
     (match exp with
       (cps:prim name param (var:t x tx) xs K)
-      -> (match (alist/lookup prim-type-map name) with
+      -> (begin
+           (printf "S prim " (sym name) " " (repr param) " " (sym x) ":" (repr (type->sexp tx))
+                   " (" (join fvart " " xs) ")\n")
+         (match (alist/lookup prim-type-map name) with
            (maybe:yes fun)
            -> (let ((txs (map var->type xs)))
                 (fun param tx txs)
                 (S env K))
            (maybe:no)
            -> (match (alist/lookup tenv name) with
-                (maybe:yes (type:arrow rtype argtypes _))
+                (maybe:yes (type:arrow rtype argtypes))
                 -> (let ((txs (map var->type xs)))
                      (for-list2 a b txs argtypes
                        (unify a b))
                      (unify rtype tx)
                      (S env K))
                 _
-                -> (raise (:TypeError (:UnknownPrim name)))))
+                -> (raise (:TypeError (:UnknownPrim name)))
+                )))
       (cps:letval (var:t x tx) val K)
       -> (S env K) ;; probably not sufficient
       (cps:letcont (cvar:t k) xs K0 K1)
@@ -205,5 +222,23 @@
     (cps:dead K)             -> (cps:dead (A K))
     )
   (A exp)
+  )
+
+;; remove void continuation arguments.
+(define (strip-void exp)
+  (define non-void?
+    (var:t _ (type:none)) -> #f
+    _                     -> #t
+    )
+  (define (F xs) (filter non-void? xs))
+  (define S
+    (cps:prim name p x vars K) -> (cps:prim name p x vars (S K))
+    (cps:letval x V K)         -> (cps:letval x V (S K))
+    (cps:letcont k xs K L)     -> (cps:letcont k (F xs) (S K) (S L))
+    (cps:appk k xs)            -> (cps:appk k (F xs))
+    (cps:dead K)               -> (cps:dead (S K))
+    otherwise                  -> otherwise
+    )
+  (S exp)
   )
 
