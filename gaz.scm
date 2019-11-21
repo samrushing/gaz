@@ -12,7 +12,7 @@
 (require "./cps.scm")
 (require "./rewrite.scm")
 (require "./solve.scm")
-(require "./cps2llvm.scm")
+(require "./llvm.scm")
 
 (define (main)
   (define formals->tenv
