@@ -6,7 +6,7 @@
 
 ;; ---- alpha conversion (renaming) ----
 
-(define (alpha fun)
+(define (alpha fun tenv)
 
   (define (R-binds env acc binds)
     (match binds with
@@ -58,9 +58,14 @@
       (maybe:no)        -> (raise (:UnknownVariable name))
       ))
 
-  (define initial-env
-    acc ()        -> acc
-    acc ((aztname:t vname type src) . tl) -> (initial-env (alist:entry vname vname acc) tl)
+  (define add-formals
+    acc ()                                -> acc
+    acc ((aztname:t vname type src) . tl) -> (add-formals (alist:entry vname vname acc) tl)
+    )
+
+  (define add-tenv
+    acc (alist:nil)                -> acc
+    acc (alist:entry name type tl) -> (add-tenv (alist:entry name name acc) tl)
     )
 
   ;; XXX this is where we lose all info about renamings!  in a real compiler we should
@@ -68,8 +73,9 @@
   ;;   location in the source.
   (match fun with
     (ztop:fun name formals body)
-    -> (let ((env (initial-env (alist:nil) formals)))
-         (ztop:fun name formals (RA env body)))
+    -> (let ((env0 (add-tenv (alist:nil) tenv))
+             (env1 (add-formals env0 formals)))
+         (ztop:fun name formals (RA env1 body)))
     otherwise
     -> otherwise
     )
