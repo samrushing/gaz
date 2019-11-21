@@ -1,15 +1,13 @@
 ;; -*- Mode: Irken -*-
 
-
-;; this will become vtype, and we'll probably have to have a way of defining
-;;  literals.
+;; this will become zlit
 (typealias val int)
 
-;; (typealias var symbol)
-;; (typealias cvar symbol)
+;; a normal variable
 (datatype var
   (:t symbol type)
   )
+;; a continuation variable.
 (datatype cvar
   (:t symbol)
   )
@@ -70,7 +68,7 @@
   (match exp with
     (cps:prim n p x vars K)
     -> (begin
-         (printf "prim " (fvart x) " = " (fname n) " " (repr p) " " (join fvar " " vars) "\n")
+         (printf "prim " (fvart x) " = " (fname n) " " (repr p) " " (join fvart " " vars) "\n")
          (dump-cps d K))
     (cps:letval x v K)
     -> (begin
@@ -143,12 +141,16 @@
   (define genvar (gensym "r"))
   (define gencont (gensym "L"))
   (define (newvar) (var:t (genvar) (make-tvar)))
+  (define (newdead) (var:t (genvar) (type/none)))
   (define (newcont) (cvar:t (gencont)))
 
   (define (cps-args env args vars K)
     (match args with
       ()        -> (K (reverse vars))
-      (hd . tl) -> (cps env hd (lambda (v) (cps-args env tl (list:cons v vars) K)))
+      (hd . tl) -> (cps
+                    env hd
+                    (lambda (v)
+                      (cps-args env tl (list:cons v vars) K)))
       ))
 
   (define (zip items)
@@ -183,7 +185,7 @@
 
   (define (valid-funcall? name nargs)
     (match (alist/lookup tenv name) with
-      (maybe:yes (type:arrow rtype argtypes _))
+      (maybe:yes (type:arrow rtype argtypes))
       -> (= nargs (length argtypes))
       _
       -> #f
@@ -198,9 +200,11 @@
   (define (cps* env exp K)
     (match exp with
       ;; currently only int.
-      (zexp:lit n)
+      (zexp:lit (zlit:int n))
       -> (let ((x (newvar)))
            (cps:letval x n (K x)))
+      (zexp:lit _)
+      -> (raise (:NotImplemented exp))
       (zexp:ref s)
       -> (match (lookup-val env s) with
            (maybe:yes v) -> (K v)
@@ -230,9 +234,13 @@
       (zexp:seq exps)
       -> (let loop ((exps exps))
            (match exps with
-             ()        -> (raise (:EmptySequence))
-             (one)     -> (cps env one K)
-             (hd . tl) -> (cps env hd (lambda (x1) (cps:dead (loop tl))))
+             ()           -> (raise (:EmptySequence))
+             (exp)        -> (cps env exp K)
+             (exp . exps) -> (let ((j (newcont)))
+                               (cps:letcont
+                                j (list (newdead))
+                                (loop exps)
+                                (cps-tail env exp j)))
              ))
       (zexp:let (aztname:t name type _) init body)
       -> (let ((j (newcont))
@@ -283,9 +291,11 @@
 
   (define (cps-tail* env exp k)
     (match exp with
-      (zexp:lit n)
+      (zexp:lit (zlit:int n))
       -> (let ((x (newvar)))
            (cps:letval x n (cps:appk k (list x))))
+      (zexp:lit _)
+      -> (raise (:NotImplemented exp))
       (zexp:ref s)
       -> (cps:appk
           k (list
@@ -305,7 +315,11 @@
            (match exps with
              ()           -> (raise (:EmptySequence))
              (exp)        -> (cps-tail env exp k)
-             (exp . exps) -> (cps env exp (lambda (x1) (cps:dead (loop exps))))
+             (exp . exps) -> (let ((j (newcont)))
+                               (cps:letcont
+                                j (list (newdead))
+                                (loop exps)
+                                (cps-tail env exp j)))
              ))
       (zexp:call name args)
       -> (cps-args
