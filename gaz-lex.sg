@@ -1,0 +1,25 @@
+;; -*- Mode: Irken -*-
+
+;; $ synlight gaz-lex.sg test/t7_5.scm
+;; $ synlight gaz-lex.sg test/t7_5.scm -html > /tmp/t7_5.scm.html
+
+(lexicon
+ ;; XXX newlines should be allowed in strings.
+ (STRING      (reg "\"([^\n\"\\\\]|\\\\.)*\""))
+ (WHITESPACE  (reg "[ \n\t]+"))
+ (COMMENT     (reg ";[^\n]*\n"))
+ (NUMBER      (reg "[0-9]+"))
+ (BIN         (reg "#b[01]+"))
+ (OCT         (reg "#o[0-7]+"))
+ (DEC         (reg "#d[0-9]+"))
+ (HEX         (reg "#x[0-9A-Fa-f]+"))
+ (COLON       (lit ":"))
+ (LBRACKET    (lit "["))
+ (RBRACKET    (lit "]"))
+ (LPAREN      (lit "("))
+ (RPAREN      (lit ")"))
+ (ARROW       (lit "->"))
+ (KEYWORD     (reg "begin|if|let|define|declare|set!|appk|prim|defmacro"))
+ (PRIVATE     (reg "%[%A-Za-z-][%A-Za-z0-9-]+"))
+ (SYMBOL      (reg "([^:;()\\[\\] \t\n\"\\.]+)|(\\.\\.\\.)"))
+ )
