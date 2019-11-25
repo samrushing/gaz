@@ -12,32 +12,27 @@
   (typerec/new) -> {parent=(maybe:no)}
   )
 
+;; idea: if we can crack this notion of 'kinds', we could
+;;  introduce a 'kind' for integer parameters, and a 'kind'
+;;  for integer ranges.  then we could represent "iterating
+;;  over a range" in a way that safely indexes vectors [by
+;;  either knowing that an index is in range or knowing how
+;;  to check that range].
+;;
+;; though: dependent types might obsolete kinds altogether?
+
 (datatype type
   (:none)
   (:int int)
   (:vec int type)
   (:arrow type (list type))
-  (:ref type)
+  (:ref type) ;; constant reference
+  (:mut type) ;; mutable reference
   (:var int typerec)
   )
 
-(define (type/int n)
-  (type:int n))
-
-(define (type/vec n t)
-  (type:vec n t))
-
-(define (type/arrow rtype argtypes)
-  (type:arrow rtype argtypes))
-
-(define (type/ref t)
-  (type:ref t))
-
 (define (type/var i)
   (type:var i (typerec/new)))
-
-(define (type/none)
-  (type:none))
 
 (define tvar-counter (make-counter 0))
 
@@ -75,6 +70,7 @@
   (type:int n)      -> (sexp (sym 'int) (int n))
   (type:vec n t)    -> (sexp (sym 'vec) (int n) (type->sexp t))
   (type:ref t)      -> (sexp (sym 'ref) (type->sexp t))
+  (type:mut t)      -> (sexp (sym 'mut) (type->sexp t))
   (type:var i _)    -> (sexp (sym 'quote) (sym (string->symbol (format (int i)))))
   (type:arrow r xs) -> (sexp (sym '->) (type->sexp r) (list (map type->sexp xs)))
   (type:none)       -> (sexp:symbol 'none)

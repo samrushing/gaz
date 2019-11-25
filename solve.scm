@@ -43,16 +43,18 @@
   )
 
 (define sig-set!
-  param rtype ((type:ref t0) t1)
+  param rtype ((type:mut t0) t1)
   -> (begin
        (unify t0 t1)
        (unify rtype none))
   _ _ _
-  -> (raise (:TypeErrorBlah (:NotRef)))
+  -> (raise (:TypeError (:NotRef)))
   )
 
 (define sig-%get
   param rtype ((type:ref t0))
+  -> (unify t0 rtype)
+  param rtype ((type:mut t0))
   -> (unify t0 rtype)
   _ _ _
   -> (raise (:TypeError (:NotRef)))
@@ -100,11 +102,11 @@
 (define sig-alloca
   param rtype ()
   -> (let ((ptype (parse-type param)))
-       (unify rtype (type/ref ptype)))
+       (unify rtype (type:mut ptype)))
   ;; XXX probably not
   param rtype (n)
   -> (let ((ptype (parse-type param)))
-       (unify rtype (type/ref ptype))
+       (unify rtype (type:mut ptype))
        (unify n i32))
   param rtype argtypes
   -> (raise (:TypeError (:Arity argtypes)))

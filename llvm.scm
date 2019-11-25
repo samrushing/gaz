@@ -190,14 +190,14 @@
           )
 
         (define (branch k xs blockname)
-          ;; XXX what if |xs| > 1 ?
-          (match k with
-            (cvar:t 'halt)
-            -> (match (var->type (first xs)) with
-                 (type:none) -> (oprintf "  ret void\n")
-                 _           -> (oprintf "  ret " (valreft (first xs)) "\n")
-                 )
-            (cvar:t k)
+          (match k xs with
+            (cvar:t 'halt) () ;; guaranteed by strip-void
+            -> (oprintf "  ret void\n")
+            (cvar:t 'halt) (one)
+            -> (oprintf "  ret " (valreft one) "\n")
+            (cvar:t 'halt) _
+            -> (raise (:LLVM/MultipleReturnValues))
+            (cvar:t k) _
             -> (oprintf "  br label %" (safe k) "\n")
             ))
 
@@ -249,14 +249,19 @@
             -> (imp)
             ))
 
+        (define ref/mut->type
+          (type:ref t) -> t
+          (type:mut t) -> t
+          _ -> (impossible)
+          )
+
         (define (prim-vref param r tr args)
           (match args with
-            ((var:t vec (type:ref tvec)) index)
+            ((var:t vec tvec) index)
             -> (match index with
                  (var:t ix (type:int isize))
                  -> (oprintf "  %" (safe r) " = getelementptr "
-                             (ftype tvec) ", "
-                             ;;(ftype tvec) "* %" (safe vec)
+                             (ftype (ref/mut->type tvec)) ", "
                              (valreft (first args))
                              ", i32 0, i" (int (if (= 0 isize) 32 isize)) " " (valref index) "\n"
                              )
@@ -267,6 +272,8 @@
         (define (prim-%get param r tr args)
           (match args with
             ((var:t p (type:ref tp)))
+            -> (oprintf "  %" (safe r) " = load " (ftype tp) ", " (ftype tp) "* " (valref (first args)) "\n")
+            ((var:t p (type:mut tp)))
             -> (oprintf "  %" (safe r) " = load " (ftype tp) ", " (ftype tp) "* " (valref (first args)) "\n")
             _
             -> (imp)
@@ -399,13 +406,14 @@
           -> (oprintf "declare " (ftype type) " @" (safe name) "\n")
           )))
     ;; emit lits
-    (for-list lit lits
+    (for-list lit (reverse lits)
       (match lit with
-        (:tuple name type val)
-        ;; @x = global [4 x i32] [i32 1, i32 2, i32 3, i32 4], align 16
+        (:tuple name (type:ref type) val)
+        -> (oprintf "@" (safe name) " = constant " (format-lit type val) "\n")
+        (:tuple name (type:mut type) val)
         -> (oprintf "@" (safe name) " = global " (format-lit type val) "\n")
-        ;; (:tuple name type other)
-        ;; -> (raise (:NotYetImplemented))
+        (:tuple name type other)
+        -> (raise (:NotYetImplemented))
         ))
     ;; emit functions
     (for-list fun funs
