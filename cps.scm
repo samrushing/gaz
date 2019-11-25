@@ -119,13 +119,6 @@
                       (cps-args env tl (list:cons v vars) K)))
       ))
 
-  (define (zip items)
-    (define loop
-      acc0 acc1 ()                    -> (:tuple (reverse acc0) (reverse acc1))
-      acc0 acc1 ((:tuple a b) . rest) -> (loop (list:cons a acc0) (list:cons b acc1) rest)
-      )
-    (loop (list:nil) (list:nil) items))
-
   (define aztname->var
     (aztname:t name type src) -> (var:t name type)
     )
@@ -179,8 +172,6 @@
             env args '()
             (lambda (vars)
               (cps:prim name param x vars (K x)))))
-      ;; (zexp:set name v)
-      ;; -> (raise (:NotImplemented exp))
       (zexp:call name args)
       -> (let ((x (newvar))
                (k (newcont)))
@@ -223,12 +214,12 @@
               (cps:letcont
                j (list x) (K x)
                (cps:letcont
-                k1 (list) (cps-tail env con j)
+                k1 '() (cps-tail env con j)
                 (cps:letcont
-                 k2 (list) (cps-tail env alt j)
+                 k2 '() (cps-tail env alt j)
                  (cps:if z k1 k2)))))))
       (zexp:loop name binds body)
-      -> (let (((vars0 inits) (zip binds))
+      -> (let (((vars0 inits) (unzip binds))
                (vars1 (map aztname->var vars0))
                (kname (cvar:t name))
                (k0 (newcont))
@@ -330,7 +321,7 @@
                k2 (list) (cps-tail env alt k)
                (cps:if z k1 k2))))))
       (zexp:loop name binds body)
-      -> (let (((vars0 inits) (zip binds))
+      -> (let (((vars0 inits) (unzip binds))
                (vars1 (map aztname->var vars0))
                (kname (cvar:t name))
                )
