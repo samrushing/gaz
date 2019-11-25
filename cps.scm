@@ -107,7 +107,7 @@
   (define genvar (gensym "r"))
   (define gencont (gensym "L"))
   (define (newvar) (var:t (genvar) (make-tvar)))
-  (define (newdead) (var:t (genvar) (type/none)))
+  (define (newdead) (var:t (genvar) (type:none)))
   (define (newcont) (cvar:t (gencont)))
 
   (define (cps-args env args vars K)

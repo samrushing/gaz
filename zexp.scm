@@ -70,7 +70,7 @@
 ;; XXX remove this fun
 (define ztop->type
   (ztop:fun (aztname:t fname rtype _) formals _)
-  -> (type/arrow rtype (map aztname/type formals))
+  -> (type:arrow rtype (map aztname/type formals))
   (ztop:decl name type)
   -> type
   (ztop:lit (aztname:t name type src) val)
