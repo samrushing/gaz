@@ -27,8 +27,8 @@
       (concat
        ;; Note the "(", these only trigger in operator position.
        "(" (regexp-opt
-	    '("begin" "if" "let" "define" "declare" "set!" "appk" "prim" "deflit"
-              "defmacro") t)
+	    '("begin" "if" "let" "define" "declare" "set!" "appk" "prim"
+              "defmacro" "define" "define-constant" "define-mutable") t)
        "\\>") 1)
      ;; named let
      '("(let\\s-+\\(\\sw+\\)" (1 font-lock-function-name-face))
@@ -62,5 +62,7 @@
          ;; (font-lock-extra-managed-props syntax-table)))
        )
   )
+
+(put 'letcont 'scheme-indent-function 1)
 
 (provide 'gaz)
