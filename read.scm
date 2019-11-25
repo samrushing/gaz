@@ -3,6 +3,8 @@
 ;; this is a new version of the lisp reader that includes source
 ;;  annotations. [from an in-progress modification to irken]
 
+;; modifying to avoid using irken ints.
+
 (define (read2 path read-char annotate?)
 
   (let ((char #\eof) ;; one-character buffer
@@ -134,12 +136,12 @@
 				  (:atom name _ _ _)      -> (ERR "bad character constant: " name)
 				   ))
 		       ;; Bb
-		       #\X -> (begin (next) (sexp:int (read-hex-int)))
-		       #\x -> (begin (next) (sexp:int (read-hex-int)))
-		       #\O -> (begin (next) (sexp:int (read-oct-int)))
-		       #\o -> (begin (next) (sexp:int (read-oct-int)))
-                       #\B -> (begin (next) (sexp:int (read-bin-int)))
-                       #\b -> (begin (next) (sexp:int (read-bin-int)))
+		       #\X -> (begin (next) (read-integer-literal 16))
+		       #\x -> (begin (next) (read-integer-literal 16))
+		       #\O -> (begin (next) (read-integer-literal 8))
+		       #\o -> (begin (next) (read-integer-literal 8))
+                       #\B -> (begin (next) (read-integer-literal 2))
+                       #\b -> (begin (next) (read-integer-literal 2))
 		       #\T -> (begin (next) (sexp:bool #t))
 		       #\t -> (begin (next) (sexp:bool #t))
 		       #\F -> (begin (next) (sexp:bool #f))
@@ -151,10 +153,11 @@
 		       ))
 	  #\)   -> (ERR "unexpected close-paren")
 	  _     -> (match (read-atom) with
-		      (:atom chars #t n _) -> (sexp:int (read-int chars n))
-		      (:atom chars #f _ 0) -> (sexp:symbol (string->symbol chars))
-		      (:atom chars #f _ n) -> (dotted-symbol chars n)
-		      )
+                     ;; XXX gaz: need to handle negative integers!
+		     (:atom chars #t n _) -> (sexp (sym '%int) (int 10) (string chars))
+		     (:atom chars #f _ 0) -> (sexp:symbol (string->symbol chars))
+		     (:atom chars #f _ n) -> (dotted-symbol chars n)
+		     )
 	  )
 	)
       )
@@ -284,44 +287,36 @@
 	      (else
 	       (string->symbol (list->string (reverse result)))))))
 
-    (define (read-int s n)
-      (let ((neg? (eq? (string-ref s 0) #\-))
-	    (start (if neg? 1 0)))
-	(let loop ((i start)
-		   (r 0))
-	  (if (= i n)
-	      (if neg? (- 0 r) r)
-	      (match (alist/lookup dec-map (string-ref s i)) with
-		(maybe:no) -> (ERR "bad decimal digit?: " (string s)) ;; impossible
-		(maybe:yes digit) -> (loop (+ i 1) (+ (* r 10) digit)))
-	      ))))
+    ;; ----- integer literals -----
 
-    ;; XXX these should probably use read-atom in order to avoid #b10101031010
-    ;;     reading as <bin> <int>
-    (define (read-hex-int)
-      (let ((neg? (eq? (peek) #\-)))
-	(if neg? (begin (next) #u))
-	(let loop ((r 0) (ch (peek)))
-	  (match (alist/lookup hex-map ch) with
-	    (maybe:yes digit) -> (loop (+ (* r 16) digit) (skip-peek))
-	    (maybe:no) -> (if neg? (- 0 r) r)))))
+    (define hex-digit? (char-class (string->list "0123456789ABCDEFabcdef")))
+    (define oct-digit? (char-class (string->list "01234567")))
+    (define bin-digit? (char-class (string->list "01")))
 
-    (define (read-oct-int)
-      (let ((neg? (eq? (peek) #\-)))
-	(if neg? (begin (next) #u))
-	(let loop ((r 0) (ch (peek)))
-	  (match (alist/lookup oct-map ch) with
-	    (maybe:yes digit) -> (loop (+ (* r 8) digit) (skip-peek))
-	    (maybe:no) -> (if neg? (- 0 r) r)))))
+    (define (all-int-class? base chars)
+      (all?
+       (match base with
+         16 -> hex-digit?
+         8  -> oct-digit?
+         2  -> bin-digit?
+         _  -> (impossible)
+         )
+       (string->list chars)))
 
-    (define (read-bin-int)
-      (let ((neg? (eq? (peek) #\-)))
-        (if neg? (begin (next) #u))
-        (let loop ((r 0) (ch (peek)))
-          (match ch with
-            #\0 -> (loop (<< r 1) (skip-peek))
-            #\1 -> (loop (logior (<< r 1) 1) (skip-peek))
-            ch  -> (if neg? (- 0 r) r)))))
+    ;; XXX gaz: should throw an error with #\-
+    (define (read-integer-literal base)
+      (match (read-atom) with
+        (:atom chars dec? n 0)
+        -> (if (all-int-class? base chars)
+               (sexp (sym '%int) (int base) (string chars))
+               (ERR "unexpected char reading base " (int base)
+                    " literal:" (string chars)))
+        (:atom chars _ _ _)
+        -> (ERR "unexpected char reading base " (int base)
+                " literal:" (string chars))
+        ))
+
+    ;; ----------
 
     (define (read)
       (skip-whitespace)
