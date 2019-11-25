@@ -88,11 +88,16 @@
   d (azexp:t exp src) -> (begin (indent-src src d) (dump-zexp d exp))
   )
 
+(define format-aztname
+  (aztname:t name ztype src)
+  -> (format (ansi cyan (sym name)) ":" (ansi yellow (repr (type->sexp ztype))))
+  )
+
 (define dump-azbind
-  d (:tuple (aztname:t name ztype src) init)
+  d (:tuple name init)
   -> (begin
-       (indent-src src d)
-       (printf (ansi cyan (sym name)) ":" (ansi yellow (repr (type->sexp ztype))))
+       (indent-src (aztname/src name) d)
+       (printf (format-aztname name))
        (dump-azexp (+ d 1) init)
        )
   )
