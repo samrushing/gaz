@@ -152,7 +152,7 @@
       ))
 
   (define (walk-let-val ann hd tl)
-    ;; (let-val name:type init body)
+    ;; (%let-val name:type init body)
     (match tl with
       (name-type init body)
       -> (wrap-ann ann (sexp hd name-type (walk init) (walk body)))
@@ -181,12 +181,22 @@
      ('%appk     walk-all)
      ('%let-val  walk-let-val)
      ('%let-loop walk-let-loop)
+     ('%let-cont walk-let-cont)
      ('%prim     walk-prim)
-     ;; this is probably a prim
-     ;;('%set!     walk-all)
+     ('%int      walk-int)
      ))
 
-  (walk exp)
+  (try
+   (walk exp)
+   except
+   (:SyntaxError src exp)
+   -> (begin
+        (printf (bold "Syntax Error: " (repr src) "\n"))
+        (dump-ann-sexp 0 exp)
+        (printf "\n")
+        (%exit #f -1)
+        )
+   )
   )
 
 (define null-ann (sexp (sym 'src) (string "null") (int 0) (int 0)))
@@ -439,14 +449,19 @@
     -> (raise (:SyntaxError ann (sexp:list other)))
     )
 
+  (define big->zlit
+    ann ((sexp:int base) (sexp:string digits))
+    -> (zlit:big (literal->big base digits))
+    ann other
+    -> (raise (:SyntaxError ann (sexp:list other)))
+    )
+
+  (define (walk-int ann lit)
+    (azexp:t (zexp:lit (big->zlit ann (map remove-annotations lit)))
+             (sexp->src ann)))
+
   ;; ----- top-level -----
 
-  ;; some thought needs to go into this.
-  ;;
-  ;; * we'd like to be able to write macros that become
-  ;;   changed top-level objects.  for example, a macro
-  ;;   that generates a series of %def-lit or %def-fun.
-  ;;
   ;; * something missing from irken: macro scope.  It would
   ;;   be nice to have lexically-scoped macros.
   ;;   what's the right way to do that?  If we consider the
@@ -519,7 +534,7 @@
       ))
 
   ;; again with the code duplication...
-  (define (parse-toplevel exp)
+  (define (parse-toplevel* exp)
     (match (ann-list? exp) with
       (maybe:yes (:tuple ann0 (hd . tl)))
       -> (match (ann-symbol? hd) with
@@ -539,8 +554,20 @@
            -> (raise (:SyntaxError ann exp0)))
       ))
 
-  ;; (%define name-type (arg ...) body)
+  (define (parse-toplevel exp)
+    (try
+     (parse-toplevel* exp)
+     except
+     (:SyntaxError src exp)
+     -> (begin
+          (printf (bold "Syntax Error: " (repr src) "\n"))
+          (dump-ann-sexp 0 exp)
+          (printf "\n")
+          (%exit #f -1)
+          )
+     ))
 
+  ;; (%define name-type (arg ...) body)
   (define (parse-fun ann exps)
     (match exps with
       (name-type formals body)
