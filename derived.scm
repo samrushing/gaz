@@ -39,9 +39,16 @@
   (declare name type) -> (%declare name type)
   )
 
+(defmacro define-constant
+  (define-constant (<%typed> name type) litval)
+  -> (%deflit (%typed name (ref type)) litval)
+  )
+(defmacro define-mutable
+  (define-mutable (<%typed> name type) litval)
+  -> (%deflit (%typed name (mut type)) litval)
+  )
+
 (defmacro define
-  (define (<%typed> name type) litval)
-  -> (%deflit (%typed name type) litval)
   (define (name) body ...)
   -> (%define name () (begin body ...))
   (define (name arg ...) body ...)
@@ -106,9 +113,9 @@
 ;; note: scheme seems to have settled (SRFIs 33, 60, 151, 142...?) on
 ;; bitwise-and, bitwise-xor, etc.
 
-(defmacro ^
-  (^ x)       -> x
-  (^ a b ...) -> (%prim xor #f a (^ b ...))
+(defmacro xor
+  (xor x)       -> x
+  (xor a b ...) -> (%prim xor #f a (xor b ...))
   )
 
 (defmacro &
@@ -122,7 +129,7 @@
   )
 
 (defmacro ~
-  (~ x)       -> (^ (- 1) x)
+  (~ x)       -> (xor (- 1) x)
   )
 
 (defmacro >>>
@@ -180,3 +187,16 @@
   (inc! n)   -> (set! n (+ n 1))
   (inc! n m) -> (set! n (+ n m))
   )
+
+;; note: type is a sexp param.
+(defmacro alloca
+  (alloca type) -> (%prim alloca type)
+  )
+
+(defmacro letcont
+  (letcont (name (var ...) body0 ...) body1 ...)
+  -> (%let-cont
+      name (var ...)
+      (begin body0 ...)
+      (begin body1 ...)
+      ))
