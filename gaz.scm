@@ -30,7 +30,7 @@
         (ztop:fun (aztname:t name rtype _) formals body)
         -> (begin (alist/push tenv name (ztop->type top)) (push! funs top))
         (ztop:lit (aztname:t name vtype _) val)
-        -> (begin (alist/push tenv name (type/ref vtype)) (push! lits (:tuple name vtype val)))
+        -> (begin (alist/push tenv name vtype) (push! lits (:tuple name vtype val)))
         (ztop:decl name type)
         -> (alist/push tenv name type)
         (ztop:mac _ _ _)
@@ -40,7 +40,8 @@
       (match (alpha fun tenv) with
         (ztop:fun (aztname:t fname ftype fsrc) formals body)
         -> (let ((tenv0 (formals->tenv tenv formals))
-                 (cps0 (zexp->cps tenv0 body))
+                 (body0 (ref-ref tenv body))
+                 (cps0 (zexp->cps tenv0 body0))
                  (cps1 (rewrite-cps cps0)))
              (printf "\ncps0:\n")
              (dump-cps 0 cps0)

@@ -150,11 +150,19 @@
 (define sig-vref
   param rtype ((type:ref (type:vec size t0)) tindex)
   -> (begin
-       (unify tindex i0)
-       (unify (type/ref t0) rtype)
+       ;; we want to express that tindex is an integer type, but
+       ;;  there's no way to do that now.  The i0 hack does not work.
+       ;;(unify tindex (type:int 0))
+       (unify (type:ref t0) rtype)
        )
-  _ a b
+  param rtype ((type:mut (type:vec size t0)) tindex)
   -> (begin
+       ;;(unify tindex (type:int 0))
+       (unify (type:mut t0) rtype)
+       )
+  param a b
+  -> (begin
+       (printf "param = " (repr param) "\n")
        (printf "args = " (join (lambda (x) (repr (type->sexp x))) ", " b)  "\n")
        (raise (:TypeError (:Vref a b)))
        )
