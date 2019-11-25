@@ -80,6 +80,15 @@
 (define (type-repr t)
   (repr (type->sexp t)))
 
+(define parse-size
+  (sexp:int size)
+  -> size
+  (sexp:list ((sexp:symbol '%int) (sexp:int 10) (sexp:string digits)))
+  -> (string->int digits)
+  exp
+  -> (raise (:ParseTypeFailed exp))
+  )
+
 (define parse-type
   (sexp:symbol 'i0)   -> i0
   (sexp:symbol 'i1)   -> i1

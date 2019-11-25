@@ -35,6 +35,7 @@
 ;; gaz literal
 (datatype zlit
   (:int int)
+  (:big big)
   (:vec (list zlit))
   )
 
@@ -99,8 +100,22 @@
 (define zlit-repr
   (zlit:int n)
   -> (format (int n))
+  (zlit:big n)
+  -> (big->dec n)
   (zlit:vec subs)
   -> (format "#(" (join zlit-repr " " subs) ")")
+  )
+
+(define zlit->sexp
+  (zlit:int n) -> (sexp (sym '%int) (int 10) (string (int->string n)))
+  (zlit:big n) -> (sexp (sym '%int) (int 10) (string (big->dec n)))
+  (zlit:vec subs) -> (sexp:vector (map zlit->sexp subs))
+  )
+
+(define zlit-zero?
+  (zlit:int 0) -> #t
+  (zlit:big (big:zero)) -> #t
+  _ -> #f
   )
 
 ;; this will get more complicated if we expand the `src` datatype.

@@ -14,43 +14,9 @@
 (define var/name (var:t name _) -> name)
 (define var/type (var:t _ type) -> type)
 
-;; now, how do we add types?  in irken we added types to the node
-;;  record, but I don't think we want that here. we either want:
-;; 1) add a type field to every record
-;;   pro: straightforward
-;;   con: tedious
-;;   con: no way to have a partially typed expression.
-;;      [unless we either create an 'unknown' type or type during cps conversion]
-;;   1a) make the type slot mutable?
-;; 2) wrap `cps` with a `tcps` tuple that includes a type.
-;;   pro: perhaps simpler?
-;;   con: may hurt embedded pattern matches.
-;;   con: breaks the datatype recursion.
-
-;; I'm leaning toward 1), with typing during cps conversion.
-;; in fact, the more I think about it, using tvars etc is probably
-;; the way to go, even if we're not doing full type inference (yet).
-
-;; perhaps this was muddled thinking.  Looking at CwCC, we can see that types
-;;  are attached to: 1) values and 2) variables.  CwCC uses a special notation
-;;  for "continuation accepting type x".  Our continuations are variadic, so what
-;;  type we attach will also be a list - or perhaps, if every 'var' has an attached
-;;  type then we get this 'for free'.  In other words, I think we might only need
-;;  to expand the 'var' datatype to include a type. [would cvar then also have an
-;;  attached type or do we 'look it up' in the environment?]
-
-;; on second thought - we have both binding and reference, I think we want type
-;;  only at the binding.  otherwise it's just a pain to deal with.
-;;  so which arms do binding? prim, letval, letcont.
-
-;; XXXXXXX letcont vars must have types!  so now I'm thinking back to
-;;   the previous version of the var type, since it seems less
-;;   inconvenient now, and (hand-waving here) would also be a natural
-;;   place to attach src annotation.
-
 (datatype cps
   (:prim symbol sexp var (list var) cps) ;; x + y
-  (:letval var val cps)                  ;; letval x = V in L
+  (:letval var zlit cps)                 ;; letval x = V in L
   (:letcont cvar (list var) cps cps)     ;; letcont k x0 x1 ... = K in L
   (:appk cvar (list var))                ;; k x0 x1 ...
   (:app symbol cvar (list var))          ;; f k x0 x1 ...
@@ -72,7 +38,7 @@
          (dump-cps d K))
     (cps:letval x v K)
     -> (begin
-         (printf "letval " (fvart x) " = " (int v) "\n")
+         (printf "letval " (fvart x) " = " (zlit-repr v) "\n")
          (dump-cps d K))
     (cps:letcont k xs K0 K1)
     -> (begin
@@ -100,7 +66,7 @@
     (cps:prim n p x vars k)  -> (sexp (sym 'prim) (sym n) p (SV x)
                                       (list (map SV vars))
                                       (S k))
-    (cps:letval x v k)       -> (sexp (sym 'letval) (SV x) (int v) (S k))
+    (cps:letval x v k)       -> (sexp (sym 'letval) (SV x) (zlit->sexp v) (S k))
     (cps:letcont k xs t0 t1) -> (sexp (sym 'letcont) (SCV k)
                                       (list (map SV xs))
                                       (S t0) (S t1))
@@ -199,12 +165,9 @@
 
   (define (cps* env exp K)
     (match exp with
-      ;; currently only int.
-      (zexp:lit (zlit:int n))
+      (zexp:lit zlit)
       -> (let ((x (newvar)))
-           (cps:letval x n (K x)))
-      (zexp:lit _)
-      -> (raise (:NotImplemented exp))
+           (cps:letval x zlit (K x)))
       (zexp:ref s)
       -> (match (lookup-val env s) with
            (maybe:yes v) -> (K v)
@@ -310,25 +273,24 @@
 
   (define (cps-tail* env exp k)
     (match exp with
-      (zexp:lit (zlit:int n))
+      (zexp:lit zlit)
       -> (let ((x (newvar)))
-           (cps:letval x n (cps:appk k (list x))))
-      (zexp:lit _)
-      -> (raise (:NotImplemented exp))
+           (cps:letval x zlit (cps:appk k (list x))))
       (zexp:ref s)
-      -> (cps:appk
-          k (list
-             (match (lookup-val env s) with
-               (maybe:yes var) -> var
-               (maybe:no) -> (var:t s (lookup-type s)))))
+      -> (match (lookup-val env s) with
+           (maybe:yes var) -> (cps:appk k (list var))
+           (maybe:no)
+           -> (match (lookup-type s) with
+                (type:ref t) -> (cps-tail* env (frob-ref s) k)
+                (type:mut t) -> (cps-tail* env (frob-ref s) k)
+                t -> (cps:appk k (list (var:t s t)))
+                ))
       (zexp:prim name param args)
       -> (let ((x (newvar)))
            (cps-args
             env args '()
             (lambda (vars)
               (cps:prim name param x vars (cps:appk k (list x))))))
-      ;; (zexp:set s v)
-      ;; -> (raise (:NotImplemented exp))
       (zexp:seq exps)
       -> (let loop ((exps exps))
            (match exps with

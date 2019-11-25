@@ -157,7 +157,7 @@
         (cps:if tst con alt)
         -> (match (lookup-venv tst venv) with
              (maybe:yes n)
-             -> (N 'beta-case (simp venv cenv S (cps:appk (if (zero? n) alt con) (list))))
+             -> (N 'beta-case (simp venv cenv S (cps:appk (if (zlit-zero? n) alt con) (list))))
              _
              -> (cps:if tst con alt)
              )

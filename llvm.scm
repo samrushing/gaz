@@ -78,9 +78,16 @@
         (type:int w)      -> (format "i" (int w))
         (type:vec size t) -> (format "[" (int size) " x " (ftype t) "]")
         (type:ref t)      -> (format (ftype t) "*")
+        (type:mut t)      -> (format (ftype t) "*")
         (type:none)       -> "void"
         _                 -> (raise (:BadLLVMType (repr (type->sexp t))))
         ))
+
+    (define flit
+      (zlit:int n) -> (format (int n))
+      (zlit:big n) -> (big->dec n)
+      (zlit:vec subs) -> (raise (:NoVectorLiteralsInLLVMYet))
+      )
 
     (define (safe name)
       (match (tree/member names symbol-index-cmp name) with
@@ -132,7 +139,7 @@
         (define valref
           (var:t x tx)
           -> (match (alist/lookup venv x) with
-               (maybe:yes (:tuple tv v)) -> (format (int v))
+               (maybe:yes (:tuple tv v)) -> (zlit-repr v)
                (maybe:no)
                -> (match (alist/lookup tenv x) with
                     (maybe:yes _) -> (format "@" (safe x))
@@ -144,7 +151,7 @@
           (var:t x tx)
           -> (match (alist/lookup venv x) with
                ;; XXX assert tv == tx?
-               (maybe:yes (:tuple tv v)) -> (format (ftype tv) " " (int v))
+               (maybe:yes (:tuple tv v)) -> (format (ftype tv) " " (zlit-repr v))
                (maybe:no)
                -> (match (alist/lookup tenv x) with
                     (maybe:yes _) -> (format (ftype tx) " @" (safe x))
@@ -361,6 +368,8 @@
       (match ty lit with
         (type:int size) (zlit:int n)
         -> (format (ftype ty) " " (int n))
+        (type:int size) (zlit:big n)
+        -> (format (ftype ty) " " (big->dec n))
         (type:vec size ty0) (zlit:vec subs)
         -> (if (= size (length subs))
                (format "[" (int size) " x " (ftype ty0) "] ["

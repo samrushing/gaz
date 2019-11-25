@@ -1,5 +1,7 @@
 ;; -*- Mode: Irken -*-
 
+(require "lib/bignum.scm")
+
 ;; Note: this is really our first-pass parser, and will be detecting the most
 ;;  common syntax errors.  So we'll need to handle those cleanly _here_.
 
@@ -558,6 +560,7 @@
 
   (define (parse-lit ann exps)
     (define sexp->zlit
+      (sexp:list ((sexp:symbol '%int) . tl)) -> (big->zlit ann tl)
       (sexp:int n)       -> (zlit:int n)
       (sexp:vector subs) -> (zlit:vec (map sexp->zlit subs))
       other              -> (raise (:SyntaxError ann other))
@@ -614,6 +617,26 @@
     (printf "done\n")
     (reverse tops)
     ))
+
+(define (literal->big base digits)
+  (define digits-table
+    (alist/make
+     (#\0 0) (#\1 1) (#\2 2) (#\3 3) (#\4 4)
+     (#\5 5) (#\6 6) (#\7 7) (#\8 8) (#\9 9)
+     (#\a 10) (#\b 11) (#\c 12) (#\d 13) (#\e 14) (#\f 15)
+     (#\A 10) (#\B 11) (#\C 12) (#\D 13) (#\E 14) (#\F 15)
+     ))
+  (define (digit->int dig)
+    (match (alist/lookup digits-table dig) with
+      (maybe:yes val) -> val
+      (maybe:no) -> (impossible)
+      ))
+  (define R
+    acc b ()           -> acc
+    acc b (dig . digs) -> (R (big (+ (* acc b) (I (digit->int dig)))) b digs)
+    )
+  (R (big:zero) (int->big base) (string->list digits))
+  )
 
 (define (read-files paths)
 
