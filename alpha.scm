@@ -1,5 +1,7 @@
 ;; -*- Mode: Irken -*-
 
+;; XXX could this be rewritten with walk-zexp?
+
 ;;
 ;;   here we can also build a map from newname -> (oldname, src)
 ;;
@@ -16,6 +18,14 @@
            (R-binds env0 (list:cons (:tuple vt0 (RA env i)) acc) tl))
       ))
 
+  (define (R-vars env acc vars)
+    (match vars with
+      () -> (:tuple (reverse acc) env)
+      (var . vars)
+      -> (let (((var0 env0) (extend env var)))
+           (R-vars env0 (list:cons var0 acc) vars))
+      ))
+
   (define RA
     env (azexp:t exp src)
     -> (azexp:t (R src env exp) src)
@@ -30,13 +40,15 @@
     src env (zexp:let nt i body)    -> (let (((nt0 env0) (extend env nt)))
                                        (zexp:let nt0 (RA env i) (RA env0 body)))
     src env (zexp:ref name)         -> (zexp:ref (lookup env name))
-    ;; src env (zexp:set name val)   -> (zexp:set (lookup env name) (RA env val))
     src env (zexp:if t c a)         -> (zexp:if (RA env t) (RA env c) (RA env a))
     src env (zexp:call name args)   -> (zexp:call name (map (partial (RA env _)) args))
     src env (zexp:loop k binds b)   -> (let (((k0 env0) (extend env (aztname:t k (new-tvar) src)))
-                                           ((binds0 env1) (R-binds env0 (list:nil) binds)))
-                                       (zexp:loop (aztname/name k0) binds0 (RA env1 b)))
+                                             ((binds0 env1) (R-binds env0 (list:nil) binds)))
+                                         (zexp:loop (aztname/name k0) binds0 (RA env1 b)))
     src env (zexp:appk k args)      -> (zexp:appk (lookup env k) (map (partial (RA env _)) args))
+    src env (zexp:letcont k vs K L) -> (let (((vars0 env0) (R-vars env (list:nil) vs))
+                                             ((k0 env1) (extend env (aztname:t k (new-tvar) src))))
+                                         (zexp:letcont (aztname/name k0) vars0 (RA env0 K) (RA env1 L)))
     )
 
   (define gensym

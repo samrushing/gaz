@@ -45,12 +45,13 @@
   (:seq (list azexp))                  ;; exp ...
   (:let aztname azexp azexp)           ;; name:type init body
   (:ref symbol)                        ;; name
-  ;;(:set symbol azexp)                ;; name value
   (:if azexp azexp azexp)              ;; test con alt
   (:call symbol (list azexp))          ;; name args
   (:loop symbol                        ;; name
          (list (:tuple aztname azexp)) ;; (name:type init)+
          azexp)                        ;; body
+  (:letcont symbol (list aztname)      ;; Kname args K L
+            azexp azexp)
   (:appk symbol (list azexp))          ;; kname arg
   )
 
@@ -197,4 +198,106 @@
        (for-list bind binds
          (dump-azbind (+ d 1) bind))
        (dump-azexp (+ d 1) body))
+  d (zexp:letcont Kname args K L)
+  -> (begin
+       (printf "letcont " (ansi cyan (sym Kname)) " "
+               (join format-aztname " " args))
+       (dump-azexp (+ d 1) K)
+       (dump-azexp d L)
+       )
   )
+
+;; these belong in lib/pair.scm
+
+(define (unzip pairs)
+  (define U
+    acc0 acc1 ()                    -> (:tuple (reverse acc0) (reverse acc1))
+    acc0 acc1 ((:tuple a b) . rest) -> (U (list:cons a acc0) (list:cons b acc1) rest)
+    )
+  (U (list:nil) (list:nil) pairs))
+
+(define (zip as bs)
+  (define Z
+    acc () () -> acc
+    acc (a . as) (b . bs) -> (Z (list:cons (:tuple a b) acc) as bs)
+    acc _ _ -> (raise (:Zip/UnequalLengthLists))
+    )
+  (Z '() as bs)
+  )
+
+;;
+;; run (p walk src env zexp) over exp.
+;;
+;; your procedure `p` makes the decision of when/how to continue
+;;   walking the expression.
+
+(define (walk-zexp tenv exp p)
+
+  (define extend
+    env (aztname:t name type src) -> (alist:entry name type env)
+    )
+
+  (define extend*
+    env ()        -> env
+    env (hd . tl) -> (extend* (extend env hd) tl)
+    )
+
+  ;; remove, process, and restore annotation.
+  (define W
+    env (azexp:t exp src)
+    -> (azexp:t (p W0 src env exp) src)
+    )
+
+  (define W*
+    acc env ()        -> (reverse acc)
+    acc env (hd . tl) -> (W* (list:cons (W env hd) acc) env tl)
+    )
+
+  (define W0
+    env (zexp:lit v)       -> (zexp:lit v)
+    env (zexp:ref n)       -> (zexp:ref n)
+    env (zexp:prim n p xs) -> (zexp:prim n p (W* '() env xs))
+    env (zexp:seq xs)      -> (zexp:seq (W* '() env xs))
+    env (zexp:if t c a)    -> (zexp:if (W env t) (W env c) (W env a))
+    env (zexp:appk n xs)   -> (zexp:appk n (W* '() env xs))
+    env (zexp:call n xs)   -> (zexp:call n (W* '() env xs))
+    env (zexp:let n i b)   -> (zexp:let n (W env i) (W (extend env n) b))
+    env (zexp:letcont n names k l)
+    -> (let ((env0 (extend* env names)))
+         (zexp:letcont n names (W env0 k) (W env0 l)))
+    env (zexp:loop n binds body)
+    -> (let (((names inits) (unzip binds))
+             (env0 (extend* env names)))
+         (zexp:loop n
+                    (zip names (W* '() env0 inits))
+                    (W env0 body)))
+    )
+
+  (W tenv exp)
+  )
+
+;; ref-ref: convert (varref x:(ref T)) into (%get x)
+
+(define (ref-ref env exp)
+
+  (define convert
+    walk src env (zexp:ref n)
+    -> (match (alist/lookup env n) with
+         ;; leave (ref (vec ...)) alone.
+         (maybe:yes (type:ref (type:vec _ _)))
+         -> (zexp:ref n)
+         ;; is this a ref type? if so, replace it with (%get x)
+         (maybe:yes (type:ref t))
+         -> (zexp:prim '%get (sexp:undef) (list (azexp:t (zexp:ref n) src)))
+         _
+         -> (zexp:ref n)
+         )
+    walk src env exp
+    -> (walk env exp)
+    )
+
+  (walk-zexp env exp convert)
+
+  )
+
+

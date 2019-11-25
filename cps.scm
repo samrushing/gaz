@@ -279,10 +279,29 @@
                (cps:letcont
                 k0 (list x0) (K x0)
                 (cps:appk kname vars2))))))
+      ;; we want BOTH kbody and lbody to proceed
+      ;;   to K, the surrounding context.
+      (zexp:letcont name vars kbody lbody)
+      -> (let ((k (newcont))
+               (r (newvar))
+               (kname (cvar:t name))
+               (vars0 (map aztname->var vars)))
+           (cps:letcont
+            k (list r) (K r)
+            (cps:letcont
+             kname vars0
+             (cps-tail (extend* env vars0) kbody k)
+             (cps-tail env lbody k))))
       (zexp:appk k xs)
       -> (raise (:NonTailAppK))
       )
     )
+
+  ;; bit of a hack here.  transparently change
+  ;; (zexp:ref x) => (%prim '%get #f x)
+  ;; this is probably the wrong place/way to do this?
+  (define (frob-ref s)
+    (zexp:prim '%get (sexp:undef) (list (azexp:t (zexp:ref s) null-src))))
 
   ;; This is the rounded-bracket ((X)) conversion from CwCC
   (define cps-tail
@@ -360,6 +379,13 @@
                kname vars1
                (cps-tail (extend* env vars1) body k)
                (cps:appk kname vars2)))))
+      (zexp:letcont name vars kbody lbody)
+      -> (let ((vars0 (map aztname->var vars))
+               (kname (cvar:t name)))
+           (cps:letcont
+            kname vars0
+            (cps-tail (extend* env vars0) kbody k)
+            (cps-tail env lbody k)))
       (zexp:appk k vals)
       -> (cps-args env vals '() (lambda (vars) (cps:appk (cvar:t k) vars)))
       ))

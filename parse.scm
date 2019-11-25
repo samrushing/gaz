@@ -158,6 +158,20 @@
       -> (raise (:SyntaxError ann (sexp:list tl)))
       ))
 
+  (define (walk-let-cont ann hd tl)
+    ;; (%let-cont Kname (name:type ...) K L)
+    (match tl with
+      (Kname vars K L)
+      -> (wrap-ann ann (sexp hd Kname vars (walk K) (walk L)))
+      otherwise
+      -> (raise (:SyntaxError ann (sexp:list tl)))
+      ))
+
+  ;; this is actually a no-op.
+  (define (walk-int ann hd tl)
+    (wrap-ann ann (sexp:list (list:cons hd tl)))
+    )
+
   (define core-forms
     (alist/make
      ('%begin    walk-all)
@@ -244,7 +258,9 @@
      ('%prim     walk-prim)
      ('%let-val  walk-let-val)
      ('%let-loop walk-let-loop)
+     ('%let-cont walk-let-cont)
      ('%appk     walk-appk)
+     ('%int      walk-int)
      ))
 
   ;; XXX I think a bunch of this boilerplate can be shrunk by
@@ -384,6 +400,24 @@
              (sexp->src ann))
          (:tuple ann0 other)
          -> (raise (:SyntaxError ann0 other))
+         )
+    ann other
+    -> (raise (:SyntaxError ann (sexp:list other)))
+    )
+
+  (define walk-let-cont
+    ann (Kname vars K L)
+    -> (match (unpack-ann Kname) (unpack-ann vars) with
+         (:tuple ann0 (sexp:symbol Kname0)) (:tuple ann1 (sexp:list vars0))
+         -> (azexp:t
+             (zexp:letcont
+              Kname0
+              (map (partial (parse-name-type ann _)) vars0)
+              (walk K)
+              (walk L))
+             (sexp->src ann))
+         _ _
+         -> (raise (:SyntaxError ann (sexp Kname vars K L)))
          )
     ann other
     -> (raise (:SyntaxError ann (sexp:list other)))
