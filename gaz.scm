@@ -8,7 +8,7 @@
 (require "./macros.scm")
 (require "./parse.scm")
 (require "./zexp.scm")
-(require "./types0.scm")
+(require "./types.scm")
 (require "./alpha.scm")
 (require "./cps.scm")
 (require "./rewrite.scm")
