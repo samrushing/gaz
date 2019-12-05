@@ -73,21 +73,36 @@
         (local '()))
 
     ;; format a type for llvm.
-    (define (ftype t)
-      (match (apply-subst t) with
-        (type:int w)      -> (format "i" (int w))
-        (type:vec size t) -> (format "[" (int size) " x " (ftype t) "]")
-        (type:ref t)      -> (format (ftype t) "*")
-        (type:mut t)      -> (format (ftype t) "*")
-        (type:none)       -> "void"
-        _                 -> (raise (:BadLLVMType (repr (type->sexp t))))
+    (define (ftype* asvec? t)
+      (match asvec? (apply-subst t) with
+        #t (type:vec (itype:fix s) t) -> (format "<" (int s) " x " (ftype* #f t) ">")
+        #f (type:vec (itype:fix s) t) -> (format "[" (int s) " x " (ftype* #f t) "]")
+        _  (type:int (itype:fix w))   -> (format "i" (int w))
+        _  (type:ref t)               -> (format (ftype* #f t) "*")
+        _  (type:mut t)               -> (format (ftype* #f t) "*")
+        _  (type:none)                -> "void"
+        _  _                          -> (raise (:BadLLVMType (repr (type->sexp t))))
         ))
 
+    (define (ftype t)
+      (ftype* #t t))
+
+    (define (ftypenv t)
+      (ftype* #f t))
+
+    ;; for valref[t] (i.e., 'immediate' literals).
+    ;; compare format-lit below.
     (define flit
-      (zlit:int n) -> (format (int n))
-      (zlit:big n) -> (big->dec n)
-      (zlit:vec subs) -> (raise (:NoVectorLiteralsInLLVMYet))
+      ftype? (type:vec size type) (zlit:vec subs)
+      -> (format "<" (join (lambda (x) (flit #t type x)) ", " (vector->list subs)) ">")
+      ftype? ty (zlit:int n)
+      -> (format (if ftype? (format (ftype ty) " ") "") (int n))
+      ftype? ty (zlit:big n)
+      -> (format (if ftype? (format (ftype ty) " ") "") (big->dec n))
+      _ _ _
+      -> (imp)
       )
+
 
     (define (safe name)
       (match (tree/member names symbol-index-cmp name) with
@@ -107,7 +122,7 @@
           (let ((counter 0))
             (lambda ()
               (inc! counter)
-              (string->symbol (format "r" (int counter))))))
+              (format "%tmp" (int counter)))))
 
         (define (pass1 exp blockname)
           (match exp with
@@ -139,7 +154,7 @@
         (define valref
           (var:t x tx)
           -> (match (alist/lookup venv x) with
-               (maybe:yes (:tuple tv v)) -> (zlit-repr v)
+               (maybe:yes (:tuple tv v)) -> (flit #f tv v)
                (maybe:no)
                -> (match (alist/lookup tenv x) with
                     (maybe:yes _) -> (format "@" (safe x))
@@ -150,8 +165,9 @@
         (define valreft
           (var:t x tx)
           -> (match (alist/lookup venv x) with
-               ;; XXX assert tv == tx?
-               (maybe:yes (:tuple tv v)) -> (format (ftype tv) " " (zlit-repr v))
+               ;; special case for vector literals
+               (maybe:yes (:tuple (type:vec size tv) v)) -> (flit #t (type:vec size tv) v)
+               (maybe:yes (:tuple tv v)) -> (format (ftype tv) " " (flit #f tv v))
                (maybe:no)
                -> (match (alist/lookup tenv x) with
                     (maybe:yes _) -> (format (ftype tx) " @" (safe x))
@@ -309,10 +325,7 @@
         (define (prim-alloca param r tr args)
           (match (parse-type param) args with
             type ()
-            -> (oprintf "  %" (safe r) " = alloca " (ftype type) ", i32 1\n")
-            ;; XXX probably not.
-            type (n)
-            -> (oprintf "  %" (safe r) " = alloca " (ftype type) ", " (valreft n) "\n")
+            -> (oprintf "  %" (safe r) " = alloca " (ftypenv type) ", i32 1\n")
             _ _
             -> (imp)
             ))
@@ -437,4 +450,5 @@
       (oprintf k "\n"))
     (file/flush ofile)
     (file/close ofile)
+    0
     ))

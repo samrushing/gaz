@@ -345,3 +345,25 @@
   (S exp)
   )
 
+;; provide a default (e.g. i32) for otherwise unknown array indexing.
+(define (default-vec-index exp index-type)
+
+  (define W
+    (cps:prim '%vref _ _ (src index) K)
+    -> (match index with
+         (var:t _ (type:int (itype:var _)))
+         -> (begin (unify (var/type index) index-type) (W K))
+         _
+         -> (W K)
+         )
+    (cps:prim _ _ _ _ K)   -> (W K)
+    (cps:letval x V K)     -> (W K)
+    (cps:letcont k xs K L) -> (begin (W K) (W L))
+    (cps:dead K)           -> (W K)
+    otherwise              -> #u
+    )
+
+  (W exp)
+
+  )
+

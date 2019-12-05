@@ -36,7 +36,7 @@
 (datatype zlit
   (:int int)
   (:big big)
-  (:vec (list zlit))
+  (:vec (vector zlit))
   )
 
 ;; gaz expression
@@ -85,7 +85,8 @@
                       (lpad 4 (int src.pos)) "]  " (repeat depth "  "))))
 
 (define dump-azexp
-  d (azexp:t exp src) -> (begin (indent-src src d) (dump-zexp d exp))
+  d (azexp:t exp src)
+  -> (begin (indent-src src d) (dump-zexp d exp))
   )
 
 (define format-aztname
@@ -103,24 +104,21 @@
   )
 
 (define zlit-repr
-  (zlit:int n)
-  -> (format (int n))
-  (zlit:big n)
-  -> (big->dec n)
-  (zlit:vec subs)
-  -> (format "#(" (join zlit-repr " " subs) ")")
+  (zlit:int n)    -> (format (int n))
+  (zlit:big n)    -> (big->dec n)
+  (zlit:vec subs) -> (format "#(" (join zlit-repr " " (vector->list subs)) ")")
   )
 
 (define zlit->sexp
-  (zlit:int n) -> (sexp (sym '%int) (int 10) (string (int->string n)))
-  (zlit:big n) -> (sexp (sym '%int) (int 10) (string (big->dec n)))
-  (zlit:vec subs) -> (sexp:vector (map zlit->sexp subs))
+  (zlit:int n)    -> (sexp (sym '%int) (int 10) (string (int->string n)))
+  (zlit:big n)    -> (sexp (sym '%int) (int 10) (string (big->dec n)))
+  (zlit:vec subs) -> (sexp:vector (map zlit->sexp (vector->list subs)))
   )
 
 (define zlit-zero?
-  (zlit:int 0) -> #t
+  (zlit:int 0)          -> #t
   (zlit:big (big:zero)) -> #t
-  _ -> #f
+  _                     -> #f
   )
 
 ;; this will get more complicated if we expand the `src` datatype.
@@ -143,13 +141,11 @@
                 (indent-src src 1)
                 (printf (ansi cyan (sym name)) ":" (ansi yellow (repr (type->sexp ztype)))))
            ))
-       (dump-azexp 2 body)
-       )
+       (dump-azexp 2 body))
   (ztop:decl name type)
   -> (begin
        (indent-src null-src 0)
-       (printf "declare " (ansi cyan (sym name)) " " (repr (type->sexp type)))
-       )
+       (printf "declare " (ansi cyan (sym name)) " " (repr (type->sexp type))))
   (ztop:lit (aztname:t name type src) val)
   -> (begin
        (indent-src src 0)
@@ -219,8 +215,7 @@
        (printf "letcont " (ansi cyan (sym Kname)) " "
                (join format-aztname " " args))
        (dump-azexp (+ d 1) K)
-       (dump-azexp d L)
-       )
+       (dump-azexp d L))
   )
 
 ;; these belong in lib/pair.scm
@@ -234,9 +229,9 @@
 
 (define (zip as bs)
   (define Z
-    acc () () -> acc
+    acc () ()             -> (reverse acc)
     acc (a . as) (b . bs) -> (Z (list:cons (:tuple a b) acc) as bs)
-    acc _ _ -> (raise (:Zip/UnequalLengthLists))
+    acc _ _               -> (raise (:Zip/UnequalLengthLists))
     )
   (Z '() as bs)
   )

@@ -314,6 +314,8 @@
       -> (match exp0 with
            (sexp:int n)
            -> (azexp:t (zexp:lit (zlit:int n)) (sexp->src ann))
+           (sexp:vector subs)
+           -> (azexp:t (zexp:lit (sexp->zlit ann exp0)) (sexp->src ann))
            (sexp:symbol var)
            -> (azexp:t (zexp:ref var) (sexp->src ann))
            exp
@@ -585,17 +587,21 @@
       -> (raise (:SyntaxError ann (sexp:list exps)))
       ))
 
-  (define (parse-lit ann exps)
-    (define sexp->zlit
+  (define (sexp->zlit ann exp)
+    (define R
+      (sexp:list ((sexp:symbol '%ann) ann exp)) -> (sexp->zlit ann exp)
       (sexp:list ((sexp:symbol '%int) . tl)) -> (big->zlit ann tl)
       (sexp:int n)       -> (zlit:int n)
-      (sexp:vector subs) -> (zlit:vec (map sexp->zlit subs))
+      (sexp:vector subs) -> (zlit:vec (list->vector (map R subs)))
       other              -> (raise (:SyntaxError ann other))
       )
+    (R exp))
+
+  (define (parse-lit ann exps)
     (match exps with
       (name-type litval)
       -> (let ((zname (parse-name-type ann name-type))
-               (zlit (sexp->zlit (remove-annotations litval))))
+               (zlit (sexp->zlit ann litval)))
            (:tuple (aztname/name zname) (ztop:lit zname zlit)))
       _
       -> (raise (:SyntaxError ann (sexp:list exps)))
