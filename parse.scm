@@ -1,6 +1,7 @@
 ;; -*- Mode: Irken -*-
 
 (require "lib/bignum.scm")
+(require "./pp.scm")
 
 ;; Note: this is really our first-pass parser, and will be detecting the most
 ;;  common syntax errors.  So we'll need to handle those cleanly _here_.
@@ -261,7 +262,7 @@
 ;; (%prim name param exp ...)
 ;; (exp exp ...)
 
-(define (parse exps)
+(define (parse* exps)
 
   (define core-forms
     (alist/make
@@ -536,7 +537,7 @@
       ))
 
   ;; again with the code duplication...
-  (define (parse-toplevel* exp)
+  (define (parse-toplevel exp)
     (match (ann-list? exp) with
       (maybe:yes (:tuple ann0 (hd . tl)))
       -> (match (ann-symbol? hd) with
@@ -555,19 +556,6 @@
            (:tuple ann exp0)
            -> (raise (:SyntaxError ann exp0)))
       ))
-
-  (define (parse-toplevel exp)
-    (try
-     (parse-toplevel* exp)
-     except
-     (:SyntaxError src exp)
-     -> (begin
-          (printf (bold "Syntax Error: " (repr src) "\n"))
-          (dump-ann-sexp 0 exp)
-          (printf "\n")
-          (%exit #f -1)
-          )
-     ))
 
   ;; (%define name-type (arg ...) body)
   (define (parse-fun ann exps)
@@ -636,11 +624,12 @@
       (match other with
         (:tuple ann exp)
         -> (let ((exp0 (transform menv exp)))
-             (dump-ann-sexp 0 exp)
-             (printf "\n")
-             (dump-ann-sexp 0 exp0)
-             (printf "\n")
-             (pp exp0 80)
+             (pp-src ann exp0 80)
+             ;; (dump-ann-sexp 0 exp)
+             ;; (printf "\n")
+             ;; (dump-ann-sexp 0 exp0)
+             ;; (printf "\n")
+             ;; (pp exp0 80)
              (let (((name ztop) (parse-toplevel exp0)))
                (push! tops ztop)
                ;;(dump-azexp 0 zexp)
@@ -650,6 +639,20 @@
     (printf "done\n")
     (reverse tops)
     ))
+
+(define (parse exps)
+  (try
+   (parse* exps)
+   except
+   (:SyntaxError src exp)
+   -> (begin
+        (printf (bold "Syntax Error: " (repr src) "\n"))
+        (pp-src src exp 80)
+        ;;(dump-ann-sexp 0 exp)
+        (printf "\n")
+        (%exit #f -1)
+        )
+   ))
 
 (define (literal->big base digits)
   (define digits-table
