@@ -27,8 +27,8 @@
       (concat
        ;; Note the "(", these only trigger in operator position.
        "(" (regexp-opt
-	    '("begin" "if" "let" "define" "declare" "set!" "appk" "prim"
-              "defmacro" "define" "define-constant" "define-mutable") t)
+	    '("begin" "if" "let" "define" "declare" "set!" "appk" "goto" "prim"
+              "defmacro" "define" "define-constant" "define-mutable" "for") t)
        "\\>") 1)
      ;; named let
      '("(let\\s-+\\(\\sw+\\)" (1 font-lock-function-name-face))
@@ -36,12 +36,12 @@
      '("(define\\s-+(?\\([^ :\t\n)]+\\)" . (1 font-lock-function-name-face))
      '("(declare\\s-+(?\\([^ :\t\n)]+\\)" . (1 font-lock-function-name-face))
      '("(defmacro\\s-+(?\\([^ :\t\n)]+\\)" . (1 font-lock-function-name-face))
+     ;; builtins
+     '("(\\(%[^ :\t\n)]+\\)" . font-lock-builtin-face)
      ;; name:type
      '(gaz-font-lock-var  (0 font-lock-variable-name-face))
      '(gaz-font-lock-type (0 font-lock-type-face))
      '("->" . font-lock-function-name-face)
-     ;; builtins
-     '("(\\(%[^ :\t\n)]+\\)" . font-lock-builtin-face)
       ))
   "Gaudy expressions to highlight in Scheme modes.")
 
@@ -64,5 +64,6 @@
   )
 
 (put 'letcont 'scheme-indent-function 1)
+(put 'for 'scheme-indent-function 1)
 
 (provide 'gaz)
