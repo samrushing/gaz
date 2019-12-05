@@ -255,33 +255,44 @@
           _ -> (impossible)
           )
 
+        ;; getelementptr interprets index values as _signed_, which definitely
+        ;;   causes problems for i8 & i16.  Cast these to i32 before using them.
+        (define (maybe-unsign-index index)
+          (match index with
+            (var:t ix (type:int (itype:fix isize)))
+            -> (if (>= isize 32)
+                   (valreft index)
+                   (let ((tmp (gensym)))
+                     (oprintf "  " tmp " = zext " (valreft index) " to i32\n")
+                     (format "i32 " tmp)))
+            _
+            -> (imp)
+            ))
+
         (define (prim-vref param r tr args)
           (match args with
             ((var:t vec tvec) index)
-            -> (match index with
-                 (var:t ix (type:int isize))
-                 -> (oprintf "  %" (safe r) " = getelementptr "
-                             (ftype (ref/mut->type tvec)) ", "
-                             (valreft (first args))
-                             ", i32 0, i" (int (if (= 0 isize) 32 isize)) " " (valref index) "\n"
-                             )
-                 _ -> (imp))
+            -> (let ((index0 (maybe-unsign-index index)))
+                 (oprintf "  %" (safe r) " = getelementptr "
+                          (ftypenv (ref/mut->type tvec)) ", "
+                          (valreft (first args))
+                          ", i32 0, " index0 "\n"))
             _ -> (imp)
             ))
 
         (define (prim-%get param r tr args)
           (match args with
             ((var:t p (type:ref tp)))
-            -> (oprintf "  %" (safe r) " = load " (ftype tp) ", " (ftype tp) "* " (valref (first args)) "\n")
+            -> (oprintf "  %" (safe r) " = load " (ftypenv tp) ", " (ftypenv tp) "* " (valref (first args)) "\n")
             ((var:t p (type:mut tp)))
-            -> (oprintf "  %" (safe r) " = load " (ftype tp) ", " (ftype tp) "* " (valref (first args)) "\n")
+            -> (oprintf "  %" (safe r) " = load " (ftypenv tp) ", " (ftypenv tp) "* " (valref (first args)) "\n")
             _
             -> (imp)
             ))
 
         (define (prim-zext param r tr args)
           (match (parse-type param) with
-            (type:int osize)
+            (type:int (itype:fix osize))
             -> (oprintf "  %" (safe r) " = zext " (valreft (first args)) " to i" (int osize) "\n")
             _
             -> (imp)
@@ -289,7 +300,7 @@
 
         (define (prim-trunc param r tr args)
           (match (parse-type param) with
-            (type:int osize)
+            (type:int (itype:fix osize))
             -> (oprintf "  %" (safe r) " = trunc " (valreft (first args)) " to i" (int osize) "\n")
             _
             -> (imp)
@@ -377,10 +388,10 @@
         -> (format (ftype ty) " " (int n))
         (type:int size) (zlit:big n)
         -> (format (ftype ty) " " (big->dec n))
-        (type:vec size ty0) (zlit:vec subs)
-        -> (if (= size (length subs))
+        (type:vec (itype:fix size) ty0) (zlit:vec subs)
+        -> (if (= size (vector-length subs))
                (format "[" (int size) " x " (ftype ty0) "] ["
-                       (join (partial (format-lit ty0 _)) ", " subs) "]")
+                       (join (partial (format-lit ty0 _)) ", " (vector->list subs)) "]")
                (raise (:BadLit lit)))
         ty vec
         -> (raise (:BadLit lit))

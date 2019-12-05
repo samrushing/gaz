@@ -13,6 +13,7 @@
   )
 (define var/name (var:t name _) -> name)
 (define var/type (var:t _ type) -> type)
+(define cvar/name (cvar:t name) -> name)
 
 (datatype cps
   (:prim symbol sexp var (list var) cps) ;; x + y
@@ -92,11 +93,11 @@
 
 (define (zexp->cps tenv exp)
 
-  (define make-tvar
-    (let ((counter 0))
-      (lambda ()
-        (inc! counter)
-        (type/var counter))))
+  (define (make-tvar)
+    (new-tvar))
+
+  (define (make-itvar)
+    (type:int (new-itvar)))
 
   (define (gensym prefix)
     (let ((counter 0))
@@ -107,6 +108,7 @@
   (define genvar (gensym "r"))
   (define gencont (gensym "L"))
   (define (newvar) (var:t (genvar) (make-tvar)))
+  (define (newintvar) (var:t (genvar) (make-itvar)))
   (define (newdead) (var:t (genvar) (type:none)))
   (define (newcont) (cvar:t (gencont)))
 
@@ -159,7 +161,7 @@
   (define (cps* env exp K)
     (match exp with
       (zexp:lit zlit)
-      -> (let ((x (newvar)))
+      -> (let ((x (newintvar)))
            (cps:letval x zlit (K x)))
       (zexp:ref s)
       -> (match (lookup-val env s) with

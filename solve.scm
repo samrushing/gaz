@@ -153,12 +153,18 @@
        ;; we want to express that tindex is an integer type, but
        ;;  there's no way to do that now.  The i0 hack does not work.
        ;;(unify tindex (type:int 0))
+       (unify tindex (type:int (new-itvar)))
        (unify (type:ref t0) rtype)
        )
   param rtype ((type:mut (type:vec size t0)) tindex)
   -> (begin
-       ;;(unify tindex (type:int 0))
+       (unify tindex (type:int (new-itvar)))
        (unify (type:mut t0) rtype)
+       )
+  param rtype ((type:vec size t0) tindex)
+  -> (begin
+       (unify tindex (type:int (new-itvar)))
+       (unify rtype t0)
        )
   param a b
   -> (begin
@@ -173,10 +179,10 @@
 (define (sig-change-size bigger?)
   (lambda (param rtype args)
     (match args with
-      ((type:int isize))
+      ((type:int (itype:fix isize)))
       -> (let ((ptype (parse-type param)))
            (match ptype with
-             (type:int osize)
+             (type:int (itype:fix osize))
              -> (if ((if bigger? > <) osize isize)
                     (unify rtype ptype)
                     (raise (:TypeError (:Zext isize osize))))

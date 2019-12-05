@@ -6,12 +6,6 @@
 
 (require "lib/counter.scm")
 
-(typealias typerec {parent=(maybe type)})
-
-(defmacro typerec/new
-  (typerec/new) -> {parent=(maybe:no)}
-  )
-
 ;; idea: if we can crack this notion of 'kinds', we could
 ;;  introduce a 'kind' for integer parameters, and a 'kind'
 ;;  for integer ranges.  then we could represent "iterating
@@ -21,57 +15,79 @@
 ;;
 ;; though: dependent types might obsolete kinds altogether?
 
+(datatype tvar
+  (:t int {parent=(maybe 'a)})
+  )
+
+;; almost thinking we might want *two* integer kinds,
+;;  one for 'width', and another for 'size', since these
+;;  are different uses. [would a 'range' kind be another?]
+(datatype itype
+  (:fix int)
+  (:var (tvar itype))
+  )
+
 (datatype type
   (:none)
-  (:int int)
-  (:vec int type)
+  (:int itype)
+  (:vec itype type)
   (:arrow type (list type))
   (:ref type) ;; constant reference
   (:mut type) ;; mutable reference
-  (:var int typerec)
+  (:var (tvar type))
   )
 
 (define (type/var i)
-  (type:var i (typerec/new)))
+  (type:var (tvar:t i {parent=(maybe:no)})))
+
+(define (type/ivar i)
+  (itype:var (tvar:t i {parent=(maybe:no)})))
 
 (define tvar-counter (make-counter 0))
 
 (define (new-tvar)
   (type/var (tvar-counter.inc)))
 
-(define type<? magic<?)
+(define (new-itvar)
+  (type/ivar (tvar-counter.inc)))
 
 ;; NOTE: all types will be renamed 'uN' rather than 'iN' to reflect
 ;;  our only-unsigned positioning.
 
 ;; singleton base types
-(define i0   (type:int 0))
-(define i1   (type:int 1))
-(define i8   (type:int 8))
-(define i16  (type:int 16))
-(define i32  (type:int 32))
-(define i64  (type:int 64))
-(define i128 (type:int 128))
-(define i256 (type:int 256))
+(define i1   (type:int (itype:fix 1)))
+(define i8   (type:int (itype:fix 8)))
+(define i16  (type:int (itype:fix 16)))
+(define i31  (type:int (itype:fix 31)))
+(define i32  (type:int (itype:fix 32)))
+(define i64  (type:int (itype:fix 64)))
+(define i128 (type:int (itype:fix 128)))
+(define i256 (type:int (itype:fix 256)))
 (define none (type:none))
 
 ;; consider: (type:arrow (list type))
 ;;   so void functions can be represented without hacks.
 
+(define tvar->sexp
+  (tvar:t i _) -> (sexp (sym 'quote) (sym (string->symbol (format (int i)))))
+  )
+
+(define itype->sexp
+  (itype:fix n)  -> (sexp:symbol (string->symbol (format "i" (int n))))
+  (itype:var tv) -> (tvar->sexp tv)
+  )
+
+(define size->sexp
+  (itype:fix n)  -> (sexp:int n)
+  (itype:var tv) -> (tvar->sexp tv)
+  )
+
 (define type->sexp
-  (type:int 0)      -> (sexp:symbol 'i0)
-  (type:int 1)      -> (sexp:symbol 'i1)
-  (type:int 8)      -> (sexp:symbol 'i8)
-  (type:int 16)     -> (sexp:symbol 'i16)
-  (type:int 32)     -> (sexp:symbol 'i32)
-  (type:int 64)     -> (sexp:symbol 'i64)
-  (type:int 128)    -> (sexp:symbol 'i128)
-  (type:int 256)    -> (sexp:symbol 'i256)
-  (type:int n)      -> (sexp (sym 'int) (int n))
-  (type:vec n t)    -> (sexp (sym 'vec) (int n) (type->sexp t))
+  (type:int t)      -> (itype->sexp t)
+  (type:vec s t)    -> (sexp (sym 'vec) (size->sexp s) (type->sexp t))
   (type:ref t)      -> (sexp (sym 'ref) (type->sexp t))
   (type:mut t)      -> (sexp (sym 'mut) (type->sexp t))
-  (type:var i _)    -> (sexp (sym 'quote) (sym (string->symbol (format (int i)))))
+  (type:var tv)     -> (tvar->sexp tv)
   (type:arrow r xs) -> (sexp (sym '->) (type->sexp r) (list (map type->sexp xs)))
   (type:none)       -> (sexp:symbol 'none)
   )
@@ -79,41 +95,150 @@
 (define (type-repr t)
   (repr (type->sexp t)))
 
-(define parse-size
-  (sexp:int size)
-  -> size
-  (sexp:list ((sexp:symbol '%int) (sexp:int 10) (sexp:string digits)))
-  -> (string->int digits)
-  exp
-  -> (raise (:ParseTypeFailed exp))
+(define (parse-type sexp)
+
+  (define parse-size
+    (sexp:int size)
+    -> (itype:fix size)
+    (sexp:list ((sexp:symbol '%int) (sexp:int 10) (sexp:string digits)))
+    -> (itype:fix (string->int digits))
+    exp
+    -> (raise (:ParseTypeFailed exp))
+    )
+
+  (define P
+    (sexp:list ((sexp:symbol 'vec) size type))              -> (type:vec (parse-size size) (P type))
+    (sexp:list ((sexp:symbol 'ref) type))                   -> (type:ref (P type))
+    (sexp:list ((sexp:symbol 'mut) type))                   -> (type:mut (P type))
+    (sexp:list ((sexp:symbol 'arrow) rtype (sexp:list ts))) -> (type:arrow (P rtype) (map P ts))
+    (sexp:list ((sexp:symbol '->) rtype (sexp:list ts)))    -> (type:arrow (P rtype) (map P ts))
+    (sexp:symbol 'i1)   -> i1
+    (sexp:symbol 'i8)   -> i8
+    (sexp:symbol 'i16)  -> i16
+    (sexp:symbol 'i31)  -> i31
+    (sexp:symbol 'i32)  -> i32
+    (sexp:symbol 'i64)  -> i64
+    (sexp:symbol 'i128) -> i128
+    (sexp:symbol 'i256) -> i256
+    (sexp:symbol 'none) -> none
+    x                   -> (raise (:ParseTypeFailed x))
+    )
+  (P sexp)
   )
 
-(define parse-type
-  (sexp:symbol 'i0)   -> i0
-  (sexp:symbol 'i1)   -> i1
-  (sexp:symbol 'i8)   -> i8
-  (sexp:symbol 'i16)  -> i16
-  (sexp:symbol 'i32)  -> i32
-  (sexp:symbol 'i64)  -> i64
-  (sexp:symbol 'i128) -> i128
-  (sexp:symbol 'i256) -> i256
-  (sexp:symbol 'none) -> none
-  ;; vector
-  (sexp:list ((sexp:symbol 'vec) size type))
-  -> (type:vec (parse-size size) (parse-type type))
-  ;; reference
-  (sexp:list ((sexp:symbol 'ref) type))
-  -> (type:ref (parse-type type))
-  ;; mutable reference
-  (sexp:list ((sexp:symbol 'mut) type))
-  -> (type:mut (parse-type type))
-  ;; type variable
-  (sexp:list ((sexp:symbol 'quote) (sexp:int i)))
-  -> (type/var i)
-  (sexp:list ((sexp:symbol 'arrow) rtype (sexp:list argtypes)))
-  -> (type:arrow (parse-type rtype) (map parse-type argtypes))
-  (sexp:list ((sexp:symbol '->) rtype (sexp:list argtypes)))
-  -> (type:arrow (parse-type rtype) (map parse-type argtypes))
-  x -> (raise (:ParseTypeFailed x))
+(define type-isvar?
+  (type:var tv) -> (maybe:yes tv)
+  _ -> (maybe:no)
   )
 
+(define itype-isvar?
+  (itype:var tv) -> (maybe:yes tv)
+  _ -> (maybe:no)
+  )
+
+;; XXX Not sure that mucking about with mutable records to get
+;;   path compression is worth the hassle.  We should probably
+;;   just use a map-based subst and be less clever.
+
+;; type-find & type-union are quasi-polymorphic in that
+;;  they will work on either a `type` or an `itype` depending
+;;  on the maybe-predicate passed to them.
+
+;; follow the links to the ultimate parent of this type.
+(define (type-find isvar? t)
+  (define (R t)
+    (match (isvar? t) with
+      (maybe:yes (tvar:t n r))
+      -> (match r.parent with
+           (maybe:no)
+           -> t
+           (maybe:yes t0)
+           -> (let ((p (R t0))) ;; path compression
+                (set! r.parent (maybe:yes p))
+                p)
+           )
+      _ -> t
+      ))
+  (R t)
+  )
+
+;; link through type variable
+(define (type-union isvar? a b)
+  (match (isvar? a) (isvar? b) with
+    (maybe:yes (tvar:t na ra)) (maybe:yes (tvar:t nb rb))
+    -> (if (< na nb) ;; gravitate toward smaller index
+           (set! rb.parent (maybe:yes a))
+           (set! ra.parent (maybe:yes b)))
+    (maybe:yes (tvar:t na ra)) (maybe:no)
+    -> (set! ra.parent (maybe:yes b))
+    (maybe:no) (maybe:yes (tvar:t nb rb))
+    -> (set! rb.parent (maybe:yes a))
+    (maybe:no) (maybe:no)
+    -> #u
+    ))
+
+(define (unify t0 t1)
+
+  (define (type-error t0 t1)
+    (let ((t0s (type->sexp t0))
+          (t1s (type->sexp t1)))
+      (printf "U " (sexp t0s) " != " (sexp t1s) "\n")
+      (raise (:TypeError (:Unify t0s t1s)))
+      ))
+
+  (define (U-itype it0 it1)
+    ;; (printf "U-itype  " (sexp (itype->sexp it0)) " " (sexp (itype->sexp it1)) "\n")
+    (let ((u (type-find itype-isvar? it0))
+          (v (type-find itype-isvar? it1)))
+      (when (not (eq? u v))
+        (match u v with
+          (itype:fix na) (itype:fix nb) -> (if (= na nb) #u (type-error t0 t1))
+          (itype:var _) _ -> (type-union itype-isvar? u v)
+          _ (itype:var _) -> (type-union itype-isvar? u v)
+          _ _             -> (type-error t0 t1)
+          )
+        )))
+
+  (define (U t0 t1)
+    ;; (printf "U  " (sexp (type->sexp t0)) " " (sexp (type->sexp t1)) "\n")
+    (let ((u (type-find type-isvar? t0))
+          (v (type-find type-isvar? t1)))
+      (when (not (eq? u v))
+        (match u v with
+          (type:none) (type:none)
+          -> #u
+          (type:int nu) (type:int nv)
+          -> (U-itype nu nv)
+          (type:vec nu tu) (type:vec nv tv)
+          -> (begin (U-itype nu nv) (U tu tv))
+          (type:arrow ru argsu) (type:arrow rv argsv)
+          -> (begin (U ru rv) (for-each2 U argsu argsv))
+          (type:ref tu) (type:ref tv)
+          -> (U tu tv)
+          (type:mut tu) (type:mut tv)
+          -> (U tu tv)
+          (type:var _) _ -> (type-union type-isvar? u v)
+          _ (type:var _) -> (type-union type-isvar? u v)
+          _ _            -> (type-error t0 t1)
+          )
+        )))
+
+  (U t0 t1)
+  )
+
+(define (apply-subst t)
+
+  (define (pi t)
+    (type-find itype-isvar? t))
+
+  (define (p t)
+    (let ((t0 (type-find type-isvar? t)))
+      (match t0 with
+        (type:int n)        -> (type:int (pi n))
+        (type:vec n vt)     -> (type:vec (pi n) (p vt))
+        (type:arrow rt ats) -> (type:arrow (p rt) (map p ats))
+        (type:ref rt)       -> (type:ref (p rt))
+        (type:mut rt)       -> (type:mut (p rt))
+        _                   -> t0
+        )))
+  (p t))
