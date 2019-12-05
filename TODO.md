@@ -2,9 +2,12 @@
 TODO
 ----
 
-* X bigint in read.
-* X letcont form.
-* X define-constant/define-mutable.
+* explore type for bigmodints (i.e., i31)
+* debugger for evaluator
+* problem with let-loop binding environment.
+* remove unnecessary apply-subst
+* [optional?] clear alloca
+* mem2reg (i.e. something like an SSA conversion for assignments)
 * sanity check type/size/etc vector literals.
 * $gensym in mbe.
 * verbose flag.
@@ -14,3 +17,14 @@ TODO
 * start looking into vector operations.
   [might need some sample algorithms to facilitate]
 * start exploring dependent types.
+
+
+DONE
+----
+
+* bigint in read.
+* letcont form.
+* define-constant/define-mutable.
+* kinding of types.
+* compiler options
+* evaluator
