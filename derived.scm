@@ -30,13 +30,20 @@
   (begin a ...) -> (%begin a ...)
   )
 
+;; XXX to be removed
 (defmacro appk
-  (appk k) -> (%appk k)
+  (appk k)       -> (%appk k)
   (appk k a ...) -> (%appk k a ...)
   )
 
+;; synonym for appk
+(defmacro goto
+  (goto k)       -> (%appk k)
+  (goto k a ...) -> (%appk k a ...)
+  )
+
 (defmacro declare
-  (declare name type) -> (%declare name type)
+  (declare (<%typed> name type)) -> (%declare name type)
   )
 
 (defmacro define-constant
@@ -118,9 +125,17 @@
   (xor a b ...) -> (%prim xor #f a (xor b ...))
   )
 
+(defmacro xor!
+  (xor! a b ...) -> (set! a (xor a b ...))
+  )
+
 (defmacro &
   (& x)       -> x
   (& a b ...) -> (%prim and #f a (& b ...))
+  )
+
+(defmacro &!
+  (&! a b ...) -> (set! a (& a b ...))
   )
 
 (defmacro ior
@@ -155,21 +170,24 @@
   (while test body ...)
   -> (let $loop ()
        (when test
-	 body ...
-         (appk $loop)))
-  )
+         body ...
+         (appk $loop))))
 
-(defmacro for-range*
-  (for-range* (<%typed> vname vtype) lo hi body ...)
-  -> (let $loop (((%typed vname vtype) lo)
-                 ((%typed $stop vtype) hi))
+;; NB we could avoid the <%typed> literal hack if we taught
+;;  the macro expander about it as a special case. [same probably
+;;  applies to `%array-ref`].
+
+(defmacro for
+  (for ((<%typed> vname vtype) lo hi step) body ...)
+  -> (let $loop ((vname:vtype lo)
+                 ($stop:vtype hi))
        (when (< vname $stop)
          body ...
-         (appk $loop (+ vname 1) $stop))))
-
-(defmacro for-range
-  (for-range vname num body ...)
-  -> (for-range* vname 0 num body ...)
+         (appk $loop (+ vname step) $stop)))
+  (for (v lo hi) body ...)
+  -> (for (v lo hi 1) body ...)
+  (for (v hi) body ...)
+  -> (for (v 0 hi 1) body ...)
   )
 
 (defmacro %array-ref
