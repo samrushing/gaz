@@ -45,7 +45,7 @@
   (:prim symbol sexp (list azexp))     ;; name param args
   (:seq (list azexp))                  ;; exp ...
   (:let aztname azexp azexp)           ;; name:type init body
-  (:ref symbol)                        ;; name
+  (:varref symbol)                     ;; name
   (:if azexp azexp azexp)              ;; test con alt
   (:call symbol (list azexp))          ;; name args
   (:loop symbol                        ;; name
@@ -175,8 +175,8 @@
        (printf "prim " (ansi cyan (sym name)) " " (repr param))
        (for-list exp exps
          (dump-azexp (+ d 1) exp)))
-  d (zexp:ref name)
-  -> (printf "ref " (ansi cyan (sym name)))
+  d (zexp:varref name)
+  -> (printf "varref " (ansi cyan (sym name)))
   d (zexp:seq exps)
   -> (begin
        (printf "begin")
@@ -266,7 +266,7 @@
 
   (define W0
     env (zexp:lit v)       -> (zexp:lit v)
-    env (zexp:ref n)       -> (zexp:ref n)
+    env (zexp:varref n)    -> (zexp:varref n)
     env (zexp:prim n p xs) -> (zexp:prim n p (W* '() env xs))
     env (zexp:seq xs)      -> (zexp:seq (W* '() env xs))
     env (zexp:if t c a)    -> (zexp:if (W env t) (W env c) (W env a))

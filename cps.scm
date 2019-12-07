@@ -163,7 +163,7 @@
       (zexp:lit zlit)
       -> (let ((x (newintvar)))
            (cps:letval x zlit (K x)))
-      (zexp:ref s)
+      (zexp:varref s)
       -> (match (lookup-val env s) with
            (maybe:yes v) -> (K v)
            ;; XXX require declarations of external funs.
@@ -254,10 +254,11 @@
     )
 
   ;; bit of a hack here.  transparently change
-  ;; (zexp:ref x) => (%prim '%get #f x)
+  ;; (zexp:varref x) => (%prim '%get #f x)
   ;; this is probably the wrong place/way to do this?
+  ;; XXX might not be needed anymore because of the ref-ref pass.
   (define (frob-ref s)
-    (zexp:prim '%get (sexp:undef) (list (azexp:t (zexp:ref s) null-src))))
+    (zexp:prim '%get (sexp:undef) (list (azexp:t (zexp:varref s) null-src))))
 
   ;; This is the rounded-bracket ((X)) conversion from CwCC
   (define cps-tail
@@ -269,7 +270,7 @@
       (zexp:lit zlit)
       -> (let ((x (newvar)))
            (cps:letval x zlit (cps:appk k (list x))))
-      (zexp:ref s)
+      (zexp:varref s)
       -> (match (lookup-val env s) with
            (maybe:yes var) -> (cps:appk k (list var))
            (maybe:no)

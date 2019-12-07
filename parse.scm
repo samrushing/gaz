@@ -318,7 +318,7 @@
            (sexp:vector subs)
            -> (azexp:t (zexp:lit (sexp->zlit ann exp0)) (sexp->src ann))
            (sexp:symbol var)
-           -> (azexp:t (zexp:ref var) (sexp->src ann))
+           -> (azexp:t (zexp:varref var) (sexp->src ann))
            exp
            -> (raise (:SyntaxError ann exp))
            )))
