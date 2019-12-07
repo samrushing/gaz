@@ -292,17 +292,36 @@
 (define (ref-ref env exp)
 
   (define convert
-    walk src env (zexp:ref n)
-    -> (match (alist/lookup env n) with
+    ;; don't convert an lval!
+    walk src env (zexp:prim '%set! param (lval (azexp:t x xsrc)))
+    -> (zexp:prim '%set! param (list lval (azexp:t (walk env x) xsrc)))
+
+    ;; don't convert an asref
+    walk src env (zexp:prim '%asref param ((azexp:t x xsrc)))
+    -> x
+
+    walk src env (zexp:varref n)
+    -> (begin
+         (printf "convert " (sym n) " ")
+         (match (alist/lookup env n) with
+           (maybe:yes t) -> (printf (type-repr t) "\n")
+           (maybe:no)    -> (printf "?\n")
+           )
+       (match (alist/lookup env n) with
          ;; leave (ref (vec ...)) alone.
          (maybe:yes (type:ref (type:vec _ _)))
-         -> (zexp:ref n)
+         -> (zexp:varref n)
+         (maybe:yes (type:mut (type:vec _ _)))
+         -> (zexp:varref n)
          ;; is this a ref type? if so, replace it with (%get x)
          (maybe:yes (type:ref t))
-         -> (zexp:prim '%get (sexp:undef) (list (azexp:t (zexp:ref n) src)))
+         -> (zexp:prim '%get (sexp:undef) (list (azexp:t (zexp:varref n) src)))
+         (maybe:yes (type:mut t))
+         -> (zexp:prim '%get (sexp:undef) (list (azexp:t (zexp:varref n) src)))
          _
-         -> (zexp:ref n)
+         -> (zexp:varref n)
          )
+       )
     walk src env exp
     -> (walk env exp)
     )
