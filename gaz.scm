@@ -76,7 +76,7 @@
     (when-maybe v (get-string-opts opts 'paths)
       (set! paths v))
     ;; prepend our basis.
-    (set! paths (list:cons "derived.scm" (reverse paths)))
+    (set! paths (list:cons "gaz-basis.scm" (reverse paths)))
     (let ((tops (parse (read-files paths)))
           (tenv (alist:nil))
           (funs '())
