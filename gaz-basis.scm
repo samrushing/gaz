@@ -197,8 +197,8 @@
 
 ;; note: this detects setting an array 'lval', derailing the above `%get`.
 (defmacro set!
-  (set! (<%array-ref> param src index) val) -> (%set! (%prim %vref param src index) val)
-  (set! loc val)                            -> (%set! loc val)
+  (set! (<%array-ref> param src index) val) -> (%prim %set! #f (%prim %vref param src index) val)
+  (set! loc val)                            -> (%prim %set! #f loc val)
   )
 
 (defmacro inc!
