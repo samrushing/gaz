@@ -1,8 +1,5 @@
 ;; -*- Mode: Irken -*-
 
-;; this will become zlit
-(typealias val int)
-
 ;; a normal variable
 (datatype var
   (:t symbol type)
@@ -80,12 +77,6 @@
     )
   (S cps)
   )
-
-(define (alist/has-key? a k)
-  (match (alist/lookup a k) with
-    (maybe:yes _) -> #t
-    (maybe:no)    -> #f
-    ))
 
 ;; --------------
 ;; CPS conversion
@@ -179,7 +170,7 @@
                (k (newcont)))
            (cps-args
             env args '()
-            (if (or (alist/has-key? prim-type-map name)
+            (if (or (maybe? (alist/lookup prim-type-map name))
                     (valid-funcall? name (length args)))
                 (lambda (vars)
                   (cps:prim name (sexp:bool #f) x vars (K x)))
@@ -299,7 +290,7 @@
       (zexp:call name args)
       -> (cps-args
           env args '()
-          (if (or (alist/has-key? prim-type-map name)
+          (if (or (maybe? (alist/lookup prim-type-map name))
                   (valid-funcall? name (length args)))
               (lambda (vars)
                 (let ((x (newvar)))
