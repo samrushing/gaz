@@ -445,5 +445,7 @@
            (eval-fun env funmap ftype formals body 0 quiet?)
            0)
       (maybe:no)
-      -> (raise (:Eval "no main function"))
+      -> (begin
+           (printf (bold "eval: no main function.\n"))
+           0)
       )))
