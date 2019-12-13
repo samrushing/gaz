@@ -437,7 +437,7 @@
         (:tuple name (type:mut type) val)
         -> (oprintf "@" (safe name) " = global " (format-lit type val) "\n")
         (:tuple name type other)
-        -> (raise (:NotYetImplemented))
+        -> (raise (:NotYetImplemented "non-ref top-level literals"))
         ))
     ;; emit functions
     (for-list fun funs
