@@ -31,12 +31,11 @@ folks will allow ed25519 certs and this will all have been a waste of
 time.
 
 Irken has been around for about 10 years, and has no users.  In a way,
-this is an ideal situation for the language developer.  But, sure, I
-wouldn't mind if others appreciated its awesomeness.
+this is an ideal situation for the language developer.
 
 A huge barrier to Irken's adoption is its rather poor (atrocious)
 error reporting.  Gaz has been a testbed for new approaches to parsing
-and macro expansion for irken.  Since it is a much smaller language, I
+and macro expansion for Irken.  Since it is a much smaller language, I
 can iterate quickly on new ideas.  Good progress has been made!
 
 I'm also just interested in cryptography, and I have noticed many
@@ -75,7 +74,9 @@ The stages of Gaz compilation:
     * s-expression parsing of the input files.
     * macro expansion.
     * conversion to the core language ('zexp')
+    * type-checking
     * conversion to CPS (continuation-passing style).
+    * type-checking [again]
     * optimization
     * conversion to LLVM (or assembly).
 
@@ -98,7 +99,7 @@ Macros
 Gaz uses a macro-by-example system (similar to scheme's `syntax-rules`).
 The macros are defined using pattern matching against s-expressions.
 
-The larger Gaz language is defined by the macro transformations in `basis.scm`.
+The larger Gaz language is defined by the macro transformations in `gaz-basis.scm`.
 
 For example, the `*` operation:
 
@@ -141,7 +142,7 @@ LLVM
 ----
 
 Gaz currently targets the LLVM IR.  This is a great target: it's
-typed, it's SSA, and their back end can generate code for many
+typed, it's SSA, and its back ends can generate code for many
 different targets (and targets with different capabilities like
 AVX2/Neon/etc).
 
@@ -160,7 +161,8 @@ CPS vs SSA, letcont
 Gaz uses CPS as its intermediate representation.  Modern (imperative)
 compilers like LLVM use SSA.  Functional compilers often use CPS.  But
 CPS and SSA are like two sides of the same coin, mathematical 'duals'
-if you will.
+if you will.  If CPS is 'goto with arguments', SSA is 'comefrom with
+arguments.
 
 The CPS transform used here is based on Andrew Kennedy's excellent
 paper "Compiling with Continuations, Continued".
@@ -168,12 +170,15 @@ paper "Compiling with Continuations, Continued".
 `let` bindings in gaz translate directly into SSA variables.
 `letcont` represents a basic block that can be branched to.
 
-`zexp:loop` translates into a CPS `letcont` where both
-
-[wow this is going off the rails]
+`zexp:loop` translates into a CPS `letcont` where both blocks have
+access to the loop continuation, thus enabling 'recursive'
+continuations and loops of all shapes.
 
 modular integers
 ----------------
+
+I'd like to add a base type for modular integers, to aid in
+implementing constant-time EC and RSA.
 
 discuss bearssl/pornin/i31, etc here.
 
