@@ -7,9 +7,6 @@
 
 ;; this is over-complicated by the var/cvar distinction.
 
-(define fvar  (var:t name _) -> (format (sym name)))
-(define fcvar (cvar:t name)  -> (format (sym name)))
-
 (define (make-census cmpfun)
   (let ((census (tree/empty)))
     (define (add key)
@@ -61,6 +58,9 @@
 	(maybe:yes y) -> y
 	))
 
+    (define fvar  (var:t name _) -> (format (sym name)))
+    (define fcvar (cvar:t name)  -> (format (sym name)))
+
     (define vars-eq?
       () ()               -> #t
       (h0 . t0) (h1 . t1) -> (if (eq? h0 h1) (vars-eq? t0 t1) #f)
@@ -100,7 +100,7 @@
         (cps:if tst c a)         -> (cps:if (S tst) c a)
         (cps:dead k)             -> (cps:dead (R k))
         )
-      (printf "substitute-vars\n")
+      ;; (printf "substitute-vars\n")
       (R exp))
 
     (define (simp venv cenv S K)
@@ -112,6 +112,15 @@
 	;; (printf (sym s) " " (cps-repr K) "\n")
 	;; (printf "  : " (cps-repr e) "\n")
 	e)
+
+      (define can-eta-cont?
+        (cps:appk k xs) ys
+        -> (if (vars-eq? (map subst/v xs) (map subst/v ys))
+               (maybe:yes (subst/k k))
+               (maybe:no))
+        _ _
+        -> (maybe:no)
+        )
 
       (define (subst/v x)
         (apply-vsubst S x))
@@ -130,6 +139,8 @@
         ;; ===================================================================
         ;; XXX need to know when a prim is for side-effect only, can we check
         ;;   for dead continuation?? or do we just get rid of this altogether?
+        ;; XXX we need to simply add 'has side-effect' to the prim table.
+        ;;   [and assume external calls have side-effects]
         ;; ===================================================================
         (cps:prim n p x args t)
         -> (if #f ;; (= (vcount.get x) 0)
@@ -137,40 +148,23 @@
                (let ((x0 (subst/v x))
                      (args0 (map subst/v args)))
                  (cps:prim n p x0 args0 (simp venv cenv S t))))
-        ;; ETA-CONT
-        (cps:letcont k xs (cps:appk j ys) L)
-        -> (let ((j2 (subst/k j))
-                 (xs0 (map subst/v xs))
-                 (ys0 (map subst/v ys)))
-             (if (vars-eq? xs0 ys0)
-                 (N 'eta-cont (simp venv cenv (extend-csubst S k j2) L))
-                 ;; this might be what's needed *if so*
-                 ;;(simp venv (extend-cenv k (:tuple xs2 (cps:appk j2 xs1)) cenv) S L)
-                 (cps:letcont k xs0 (cps:appk j2 ys0) (simp venv cenv S L))
-                 ))
 	(cps:letcont k xs K L)
         -> (let ((xs0 (map subst/v xs))
                  (nc (ccount.get k))
                  (na (acount.get k)))
-             (printf "simp " (sym (cvar/name k)) " nc " (int nc) " na " (int na) "\n")
+             ;; (printf "simp " (sym (cvar/name k)) " nc " (int nc) " na " (int na) "\n")
              (if (= 0 (+ nc na))
                  (N 'dead-cont (simp venv cenv S L))
-                 (let ((K0 (simp venv cenv S K))
-                       (cenv0 (extend-cenv k (:tuple xs0 K0) cenv)))
-                   (if (and (= 0 nc) (= 1 na))
-                       (N 'beta-cont-1 (simp venv cenv0 S L))
-                       (cps:letcont k xs0 K0 (simp venv cenv0 S L)))
-                   )))
-        ;; THE ISSUE.
-        ;; if we leave the K portion of a used-once letcont in place, then
-        ;;   after substitution we have doubled that code.  This rapidly explodes
-        ;;   with long chains of letcont.
-        ;; however, we cannot remove it, because appk is not the only way of invoking
-        ;;   a continuation: `if` also invokes them.  I think we need to distinguish
-        ;;   between use-by-appk and use-by-if, in order to know when we can remove
-        ;;   K completely while traversing down.
-        ;; NOTE: an `if` can turn into an `appk` due to BETA-CASE.
-
+                 (match (can-eta-cont? K xs0) with
+                   (maybe:yes j)
+                   -> (N 'eta-cont (simp venv cenv (extend-csubst S k j) L))
+                   (maybe:no)
+                   -> (let ((K0 (simp venv cenv S K))
+                            (cenv0 (extend-cenv k (:tuple xs0 K0) cenv)))
+                        (if (and (= 0 nc) (= 1 na))
+                            (N 'beta-cont-1 (simp venv cenv0 S L))
+                            (cps:letcont k xs0 K0 (simp venv cenv0 S L)))
+                        ))))
 	;; BETA-CONT
 	(cps:appk k ys)
 	-> (let ((k0 (subst/k k))
@@ -178,17 +172,8 @@
              (if (and (= 0 (ccount.get k0)) (= 1 (acount.get k0)))
                  (match (lookup-cenv k0 cenv) with
                    (maybe:yes (:tuple xs K0))
-		   ;;-> (N 'beta-cont-2 (simp venv cenv (extend-vsubst* S xs ys0) K0))
-		   -> (begin
-                        (printf "beta-cont: " (sym (cvar/name k)) "/" (sym (cvar/name k0)) "\n")
-                        ;;(N 'beta-cont-2 (simp venv cenv (extend-vsubst* S xs ys0) K0))
-                        (N 'beta-cont-2 (substitute-vars (extend-vsubst* S xs ys0) K0))
-                        )
-                   _ -> (begin
-                          ;; (printf "unknown k0? " (sym (cvar/name k)) "/" (sym (cvar/name k0)) "\n")
-                          (cps:appk k0 ys0)
-                          )
-		   )
+		   -> (N 'beta-cont-2 (substitute-vars (extend-vsubst* S xs ys0) K0))
+                   _ -> (cps:appk k0 ys0))
                  (cps:appk k0 ys0)
 		 ))
         ;; BETA-CASE (as applied to 'if')
