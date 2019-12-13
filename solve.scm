@@ -24,7 +24,7 @@
 ;;  to do the type solving will work fine?
 
 (define (ftype t)
-  (repr (type->sexp t)))
+  (type-repr (apply-subst t)))
 
 ;; verify all args are arith and the same. returns that type.
 (define sig-prim-arith
@@ -47,8 +47,11 @@
   -> (begin
        (unify t0 t1)
        (unify rtype none))
-  _ _ _
-  -> (raise (:TypeError (:NotRef)))
+  _ _ argtypes
+  -> (begin
+       (printf "NotRef? (" (join type-repr ", " argtypes) ")\n")
+       (raise (:TypeError (:NotRef)))
+       )
   )
 
 (define sig-%get
@@ -57,10 +60,13 @@
   param rtype ((type:mut t0))
   -> (unify t0 rtype)
   ;; hack for non-ref vector %get.
-  param rtype (t0)
-  -> (unify rtype t0)
+  ;; param rtype (t0)
+  ;; -> (unify rtype t0)
   _ _ _
-  -> (raise (:TypeError (:NotRef)))
+  -> (begin
+       (printf "notref?\n")
+       (raise (:TypeError (:NotRef)))
+       )
   )
 
 (define sig-vref
@@ -158,6 +164,8 @@
    ('alloca sig-alloca)
    ))
 
+;; solve types for a CPS exp
+
 (define (solve tenv cenv exp)
 
   (define (UK env k0 k1)
@@ -217,7 +225,7 @@
            (maybe:no)
            -> (raise (:TypeError (:UnknownContinuation k))))
       (cps:app name k vars)
-      -> (raise (:NotYetImplemented))
+      -> (raise (:NotYetImplemented "internal funcall"))
       (cps:if (var:t t tt) (cvar:t c) (cvar:t a))
       -> (begin
            (unify tt i1)
@@ -282,6 +290,167 @@
     )
 
   (W exp)
+
+  )
+
+
+;; solve types for zexp
+
+(define (solve-zexp tenv exp)
+
+  (define (extend-with-cont env kname binds)
+    (define R
+      env0 txs ()
+      -> (:tuple env0 txs)
+      env0 txs ((:tuple (aztname:t name type _) exp) . tl)
+      -> (begin
+           (S env type exp) ;; NB: not the currently-being-extend env.
+           (R (alist:entry name type env0) (list:cons type txs) tl))
+      )
+    (let (((env0 types) (R env '() binds)))
+      (alist:entry
+       kname
+       (type:arrow (type:none) (reverse types))
+       env0)))
+
+  (define (extend-formals env formals)
+    (define R
+      env0 txs ()
+      -> (:tuple env0 txs)
+      env0 txs ((aztname:t name type _) . tl)
+      -> (R (alist:entry name type env0) (list:cons type txs) tl))
+    (R env '() formals))
+
+  (define Slit
+    env ty (zlit:none)
+    -> (unify ty (type:none))
+    env ty (zlit:big n)
+    -> (unify ty (type:int (new-itvar)))
+    env ty (zlit:vec lits)
+    -> (let ((tv (new-tvar))
+             (tsz (itype:fix (vector-length lits))))
+         (unify ty (type:vec tsz tv))
+         (for-vector lit lits
+           (Slit env tv lit))))
+
+  (define (type-repr* t)
+    (type-repr (apply-subst t)))
+
+  (define (exp->type exp)
+    (apply-subst (azexp/type exp)))
+
+  (define (Sprim env ty name param xs)
+    ;; (printf "Sprim " (sym name) " " (repr param) " " (type-repr* ty)
+    ;;         " (" (join type-repr* " " (map exp->type xs)) ")\n")
+    (match (alist/lookup prim-type-map name) with
+      (maybe:yes fun)
+      -> (begin
+           ;; (printf "unifying prim args...\n")
+           (for-list x xs
+             (S env (exp->type x) x))
+           ;; (printf "calling sig fun...\n")
+           ;; (printf "  " (type-repr* ty) " = (" (join type-repr* " " (map exp->type xs)) ")\n")
+           (fun param ty (map exp->type xs)))
+      (maybe:no)
+      -> (match (alist/lookup env name) with
+           (maybe:yes (type:arrow rtype argtypes))
+           -> (let ((txs (map exp->type xs)))
+                (for-list2 a b txs argtypes
+                  (unify a b))
+                (unify rtype ty))
+           _
+           -> (raise (:TypeError (:UnknownPrim name)))
+           )))
+
+  (define S
+    env ty0 (azexp:t exp src ty1)
+    -> (begin
+         (unify ty0 ty1)
+         ;; (printf "S* " (sym (zname exp)) "\n")
+         (S* env ty0 exp))
+    )
+
+  (define zname
+    (zexp:lit _)           -> 'lit
+    (zexp:prim _ _ _)      -> 'prim
+    (zexp:seq _)           -> 'seq
+    (zexp:let _ _ _)       -> 'let
+    (zexp:varref _)        -> 'varref
+    (zexp:if _ _ _)        -> 'if
+    (zexp:call _ _)        -> 'call
+    (zexp:loop _ _ _)      -> 'loop
+    (zexp:letcont _ _ _ _) -> 'letcont
+    (zexp:appk _ _)        -> 'appk
+    )
+
+  (define S*
+
+    env ty (zexp:lit lit)
+    -> (Slit env ty lit)
+
+    env ty (zexp:prim name param args)
+    -> (Sprim env ty name param args)
+
+    env ty (zexp:seq subs)
+    -> (let loop ((subs subs))
+         (match subs with
+           ()        -> #u ;; not reached
+           (last)    -> (S env ty last) ;; return type of seq
+           (hd . tl) -> (begin (S env (new-tvar) hd) (loop tl))
+           ))
+
+    env ty (zexp:let (aztname:t name type src) init body)
+    -> (let ((env0 (alist:entry name type env)))
+         (S env type init)
+         (S env0 ty body))
+
+    env ty (zexp:varref name)
+    -> (match (alist/lookup env name) with
+         (maybe:yes ty1) -> (unify ty ty1)
+         (maybe:no)      -> (begin
+                              (printf "varref of " (sym name) "\n")
+                              (impossible)
+                              )
+         )
+
+    env ty (zexp:if tst con alt)
+    -> (begin
+         (S env i1 tst)
+         (S env ty con)
+         (S env ty alt))
+
+    env ty (zexp:call name args)
+    -> (match (alist/lookup env name) with
+         (maybe:yes (type:arrow rtype argtypes))
+         -> (begin
+              (for-list2 arg targ args argtypes
+                (S env targ arg))
+              (unify ty rtype))
+         _
+         -> (raise (:TypeError (:BadCall name))))
+
+    env ty (zexp:loop name binds body)
+    -> (let ((env0 (extend-with-cont env name binds)))
+         (S env0 ty body))
+
+    env ty (zexp:letcont name formals K L)
+    -> (let (((env0 ftys) (extend-formals env formals)) ;; extended with vars
+             (env1 (alist:entry name (type:arrow (type:none) ftys) env))) ;; with cont.
+         (S env0 ty K)
+         (S env1 ty L))
+
+    env ty (zexp:appk name args)
+    -> (match (alist/lookup env name) with
+         (maybe:yes (type:arrow _ formals))
+         -> (for-list2 arg targ args formals
+              (S env targ arg))
+         _
+         -> (impossible)
+         )
+
+    )
+
+  (S tenv (new-tvar) exp)
 
   )
 
