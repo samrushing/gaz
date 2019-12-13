@@ -180,8 +180,8 @@
 (define (unify t0 t1)
 
   (define (type-error t0 t1)
-    (let ((t0s (type->sexp t0))
-          (t1s (type->sexp t1)))
+    (let ((t0s (type->sexp (apply-subst t0)))
+          (t1s (type->sexp (apply-subst t1))))
       (printf "U " (sexp t0s) " != " (sexp t1s) "\n")
       (raise (:TypeError (:Unify t0s t1s)))
       ))
