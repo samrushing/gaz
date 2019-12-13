@@ -27,8 +27,9 @@
       (concat
        ;; Note the "(", these only trigger in operator position.
        "(" (regexp-opt
-	    '("begin" "if" "let" "define" "declare" "set!" "appk" "goto" "prim"
-              "defmacro" "define" "define-constant" "define-mutable" "for") t)
+	    '("begin" "if" "let" "define" "declare" "set!" "appk" "goto" "prim" "cond"
+              "defmacro" "define" "define-constant" "define-mutable" "for" "letcont"
+              ) t)
        "\\>") 1)
      ;; named let
      '("(let\\s-+\\(\\sw+\\)" (1 font-lock-function-name-face))
