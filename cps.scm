@@ -12,6 +12,8 @@
 (define var/type (var:t _ type) -> type)
 (define cvar/name (cvar:t name) -> name)
 
+;; XXX consider renaming 'prim' to 'insn', since that's much closer to the truth.
+
 (datatype cps
   (:prim symbol sexp var (list var) cps) ;; x + y
   (:letval var zlit cps)                 ;; letval x = V in L

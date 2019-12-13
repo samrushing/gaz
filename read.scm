@@ -118,6 +118,7 @@
 	  #\"   -> (read-string)
 	  #\'   -> (begin (next) (sexp (sexp:symbol 'quote) (read)))
 	  #\,   -> (begin (next) (sexp (sexp:symbol 'comma) (read)))
+          #\!   -> (begin (next) (sexp (sexp:symbol 'bang) (read)))
 	  #\:   -> (begin (next) (sexp:cons 'nil (read-symbol)))
 	  #\#   -> (begin
 		     (next)

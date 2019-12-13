@@ -1,11 +1,9 @@
 ;; -*- mode: gaz -*-
 
-;; this is the beginnings of a 'derived expressions' basis
-;;  for gaz.  so all the predefined forms will go in here.
+;; these macros form the bridge between 'gaz' and 'gaz core'.
 ;;
 ;; some fun crypto-related things that might go in here:
 ;;
-;; * explicit for-range loops.
 ;; * the same, but with unrolling metadata.
 ;;
 ;; top-level expressions are:
@@ -75,7 +73,7 @@
 
 (defmacro if
   (if tst con alt) -> (%if tst con alt)
-  (if tst con)     -> (%if tst con 0)
+  (if tst con)     -> (%if tst con #u)
   )
 
 (defmacro when
@@ -115,6 +113,20 @@
   (= a b ...) -> (and (= a b) (= b ...))
   )
 
+;; [n-ary] comparison prims
+
+(defmacro %icmp-prim
+  (%icmp-prim op a b)       -> (%prim op #f a b)
+  (%icmp-prim op a b c ...) -> (and (%prim op #f a b) (%icmp-prim op b c ...))
+  )
+
+(defmacro <  (< a b ...)  -> (%icmp-prim < a b ...))
+(defmacro >  (> a b ...)  -> (%icmp-prim > a b ...))
+(defmacro =  (= a b ...)  -> (%icmp-prim = a b ...))
+(defmacro <> (<> a b ...) -> (%icmp-prim <> a b ...))
+(defmacro <= (<= a b ...) -> (%icmp-prim <= a b ...))
+(defmacro >= (>= a b ...) -> (%icmp-prim >= a b ...))
+
 ;; consider C names + scheme names?
 ;; ~, &, |, ^, ...
 ;; note: scheme seems to have settled (SRFIs 33, 60, 151, 142...?) on
@@ -145,6 +157,14 @@
 
 (defmacro ~
   (~ x)       -> (xor (- 1) x)
+  )
+
+(defmacro >>
+  (>> n s)   -> (%prim >> #f n s)
+  )
+
+(defmacro <<
+  (<< n s)   -> (%prim << #f n s)
   )
 
 (defmacro >>>
@@ -190,9 +210,13 @@
   -> (for (v 0 hi 1) body ...)
   )
 
+(defmacro bang
+  (bang x) -> (%prim %get #f x)
+  )
+
 (defmacro %array-ref
   (%array-ref param src index)
-  -> (%get (%prim %vref param src index))
+  -> (%prim %get #f (%prim %vref param src index))
   )
 
 ;; note: this detects setting an array 'lval', derailing the above `%get`.
