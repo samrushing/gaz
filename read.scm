@@ -8,7 +8,7 @@
 (define (read2 path read-char annotate?)
 
   (let ((char #\eof) ;; one-character buffer
-	(line 0)
+	(line 1)
 	(pos -1)
         (spath (sexp:string path))
         (%ann (sexp:symbol '%ann))
