@@ -307,28 +307,28 @@
       ))
 
   (define (walk-app ann op args)
-    (azexp:t (zexp:call op (map walk args)) (sexp->src ann)))
+    (azexp (zexp:call op (map walk args)) (sexp->src ann)))
 
   (define (walk-atom exp)
     (match (unpack-ann exp) with
       (:tuple ann exp0)
       -> (match exp0 with
-           (sexp:int n)
-           -> (azexp:t (zexp:lit (zlit:int n)) (sexp->src ann))
+           (sexp:undef)
+           -> (azexp (zexp:lit (zlit:none)) (sexp->src ann))
            (sexp:vector subs)
-           -> (azexp:t (zexp:lit (sexp->zlit ann exp0)) (sexp->src ann))
+           -> (azexp (zexp:lit (sexp->zlit ann exp0)) (sexp->src ann))
            (sexp:symbol var)
-           -> (azexp:t (zexp:varref var) (sexp->src ann))
+           -> (azexp (zexp:varref var) (sexp->src ann))
            exp
            -> (raise (:SyntaxError ann exp))
            )))
 
   (define (walk-begin ann exps)
-    (azexp:t (zexp:seq (map walk exps)) (sexp->src ann)))
+    (azexp (zexp:seq (map walk exps)) (sexp->src ann)))
 
   (define walk-if
     ann (tst con alt)
-    -> (azexp:t (zexp:if (walk tst) (walk con) (walk alt)) (sexp->src ann))
+    -> (azexp (zexp:if (walk tst) (walk con) (walk alt)) (sexp->src ann))
     ann other
     -> (raise (:SyntaxError ann (sexp:list other)))
     )
@@ -337,7 +337,7 @@
     ann (name param . args)
     -> (match (unpack-ann name) (unpack-ann param) with
          (:tuple ann0 (sexp:symbol name)) (:tuple ann1 param)
-         -> (azexp:t (zexp:prim name param (map walk args)) (sexp->src ann))
+         -> (azexp (zexp:prim name param (map walk args)) (sexp->src ann))
          _ _
          -> (raise (:SyntaxError ann name)) ;; cop-out, really
          )
@@ -358,7 +358,7 @@
       (:tuple ann0 (sexp:list (typed name type)))
       -> (match (unpack-ann typed) (unpack-ann name) (unpack-ann type) with
            ;; e.g. (%typed x i32)
-           (:tuple _ (sexp:symbol '%typed))
+           (:tuple ann1 (sexp:symbol '%typed))
            (:tuple ann2 (sexp:symbol name0))
            (:tuple ann3 type-expr)
            -> (aztname:t name0 (walk-type ann3 type-expr) (sexp->src ann0))
@@ -371,7 +371,7 @@
 
   (define walk-let-val
     ann (name-type init body)
-    -> (azexp:t
+    -> (azexp
         (zexp:let
          (parse-name-type ann name-type)
          (walk init)
@@ -408,7 +408,7 @@
     ann (name bindings body)
     -> (match (unpack-ann name) with
          (:tuple ann0 (sexp:symbol name))
-         -> (azexp:t
+         -> (azexp
              (zexp:loop name
                         (walk-bindings ann bindings)
                         (walk body))
@@ -424,7 +424,7 @@
     ann (Kname vars K L)
     -> (match (unpack-ann Kname) (unpack-ann vars) with
          (:tuple ann0 (sexp:symbol Kname0)) (:tuple ann1 (sexp:list vars0))
-         -> (azexp:t
+         -> (azexp
              (zexp:letcont
               Kname0
               (map (partial (parse-name-type ann _)) vars0)
@@ -442,7 +442,7 @@
     ann (name . args)
     -> (match (unpack-ann name) with
          (:tuple ann0 (sexp:symbol name))
-         -> (azexp:t
+         -> (azexp
              (zexp:appk name (map walk args))
              (sexp->src ann))
          _
@@ -460,7 +460,7 @@
     )
 
   (define (walk-int ann lit)
-    (azexp:t (zexp:lit (big->zlit ann (map remove-annotations lit)))
+    (azexp (zexp:lit (big->zlit ann (map remove-annotations lit)))
              (sexp->src ann)))
 
   ;; ----- top-level -----
@@ -579,7 +579,7 @@
     (define R
       (sexp:list ((sexp:symbol '%ann) ann exp)) -> (sexp->zlit ann exp)
       (sexp:list ((sexp:symbol '%int) . tl)) -> (big->zlit ann tl)
-      (sexp:int n)       -> (zlit:int n)
+      (sexp:int n)       -> (zlit:big (int->big n))
       (sexp:vector subs) -> (zlit:vec (list->vector (map R subs)))
       other              -> (raise (:SyntaxError ann other))
       )

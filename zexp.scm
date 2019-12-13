@@ -7,14 +7,21 @@
 
 ;; zexp annotated with src location.
 (datatype azexp
-  (:t zexp src)
+  (:t zexp src type)
+  )
+
+(define (azexp exp src)
+  (azexp:t exp src (new-tvar))
   )
 
 (define azexp/exp
-  (azexp:t exp _) -> exp
+  (azexp:t exp _ _) -> exp
   )
 (define azexp/src
-  (azexp:t _ src) -> src
+  (azexp:t _ src _) -> src
+  )
+(define azexp/type
+  (azexp:t _ _ typ) -> typ
   )
 
 ;; name:type pair with src location.
@@ -80,13 +87,16 @@
   )
 
 (define indent-src
-  src depth -> (printf
-                (ansi green "\n[" (lpad 4 (int src.line))
-                      (lpad 4 (int src.pos)) "]  " (repeat depth "  "))))
+  src depth type
+  -> (printf
+      (ansi green "\n[" (lpad 4 (int src.line))
+            (lpad 4 (int src.pos)) "] "
+            (lpad 20 (type-repr (apply-subst type))) " "
+            (repeat depth "  "))))
 
 (define dump-azexp
-  d (azexp:t exp src)
-  -> (begin (indent-src src d) (dump-zexp d exp))
+  d (azexp:t exp src type)
+  -> (begin (indent-src src d type) (dump-zexp d exp))
   )
 
 (define format-aztname
@@ -97,26 +107,25 @@
 (define dump-azbind
   d (:tuple name init)
   -> (begin
-       (indent-src (aztname/src name) d)
+       (indent-src (aztname/src name) d (aztname/type name))
        (printf (format-aztname name))
        (dump-azexp (+ d 1) init)
        )
   )
 
 (define zlit-repr
-  (zlit:int n)    -> (format (int n))
+  (zlit:none)     -> "none"
   (zlit:big n)    -> (big->dec n)
   (zlit:vec subs) -> (format "#(" (join zlit-repr " " (vector->list subs)) ")")
   )
 
 (define zlit->sexp
-  (zlit:int n)    -> (sexp (sym '%int) (int 10) (string (int->string n)))
+  (zlit:none)     -> (sexp:undef)
   (zlit:big n)    -> (sexp (sym '%int) (int 10) (string (big->dec n)))
   (zlit:vec subs) -> (sexp:vector (map zlit->sexp (vector->list subs)))
   )
 
 (define zlit-zero?
-  (zlit:int 0)          -> #t
   (zlit:big (big:zero)) -> #t
   _                     -> #f
   )
@@ -132,35 +141,35 @@
 (define dump-ztop
   (ztop:fun (aztname:t fname ftype fsrc) formals body)
   -> (begin
-       (indent-src fsrc 0)
+       (indent-src fsrc 0 ftype)
        (printf "define " (ansi cyan (sym fname)) ":" (ansi yellow (repr (type->sexp ftype))))
        (for-list formal formals
          (match formal with
            (aztname:t name ztype src)
            -> (begin
-                (indent-src src 1)
+                (indent-src src 1 ztype)
                 (printf (ansi cyan (sym name)) ":" (ansi yellow (repr (type->sexp ztype)))))
            ))
        (dump-azexp 2 body))
   (ztop:decl name type)
   -> (begin
-       (indent-src null-src 0)
+       (indent-src null-src 0 type)
        (printf "declare " (ansi cyan (sym name)) " " (repr (type->sexp type))))
   (ztop:lit (aztname:t name type src) val)
   -> (begin
-       (indent-src src 0)
+       (indent-src src 0 type)
        (printf "define " (ansi cyan (sym name))
                ":" (ansi yellow (repr (type->sexp type)))
                " " (zlit-repr val)))
   (ztop:mac name src pats)
   -> (begin
-       (indent-src src 0)
+       (indent-src src 0 (type:none))
        (printf "defmacro " (ansi cyan (sym name)))
        (for-list pat pats
          (match pat with
            (:tuple (sexpat:ann isrc ipat) (sexpat:ann osrc opat))
            -> (begin
-                (indent-src (parse-%ann isrc) 1)
+                (indent-src (parse-%ann isrc) 1 (type:none))
                 (printf (sexpat-repr ipat) (ansi yellow " -> ") (sexpat-repr opat)))
            _ -> (raise (:UnAnnotatedPatterns pat))
            )))
@@ -237,7 +246,7 @@
   )
 
 ;;
-;; run (p walk src env zexp) over exp.
+;; run (p walk src env type zexp) over exp.
 ;;
 ;; your procedure `p` makes the decision of when/how to continue
 ;;   walking the expression.
@@ -255,8 +264,8 @@
 
   ;; remove, process, and restore annotation.
   (define W
-    env (azexp:t exp src)
-    -> (azexp:t (p W0 src env exp) src)
+    env (azexp:t exp src type)
+    -> (azexp:t (p W0 src env type exp) src type)
     )
 
   (define W*
@@ -293,21 +302,15 @@
 
   (define convert
     ;; don't convert an lval!
-    walk src env (zexp:prim '%set! param (lval (azexp:t x xsrc)))
-    -> (zexp:prim '%set! param (list lval (azexp:t (walk env x) xsrc)))
+    walk src env type (zexp:prim '%set! param (lval (azexp:t x xsrc tx)))
+    -> (zexp:prim '%set! param (list lval (azexp:t (walk env x) xsrc tx)))
 
     ;; don't convert an asref
-    walk src env (zexp:prim '%asref param ((azexp:t x xsrc)))
+    walk src env type (zexp:prim '%asref param ((azexp:t x xsrc tx)))
     -> x
 
-    walk src env (zexp:varref n)
-    -> (begin
-         (printf "convert " (sym n) " ")
-         (match (alist/lookup env n) with
-           (maybe:yes t) -> (printf (type-repr t) "\n")
-           (maybe:no)    -> (printf "?\n")
-           )
-       (match (alist/lookup env n) with
+    walk src env type (zexp:varref n)
+    -> (match (alist/lookup env n) with
          ;; leave (ref (vec ...)) alone.
          (maybe:yes (type:ref (type:vec _ _)))
          -> (zexp:varref n)
@@ -315,14 +318,13 @@
          -> (zexp:varref n)
          ;; is this a ref type? if so, replace it with (%get x)
          (maybe:yes (type:ref t))
-         -> (zexp:prim '%get (sexp:undef) (list (azexp:t (zexp:varref n) src)))
+         -> (zexp:prim '%get (sexp:undef) (list (azexp:t (zexp:varref n) src (new-tvar))))
          (maybe:yes (type:mut t))
-         -> (zexp:prim '%get (sexp:undef) (list (azexp:t (zexp:varref n) src)))
+         -> (zexp:prim '%get (sexp:undef) (list (azexp:t (zexp:varref n) src (new-tvar))))
          _
          -> (zexp:varref n)
          )
-       )
-    walk src env exp
+    walk src env type exp
     -> (walk env exp)
     )
 

@@ -146,7 +146,7 @@
   ;; This is the square-bracket [[X]] conversion from CwCC
   (define cps
     ;; strip src annotation [for now]
-    env (azexp:t exp src) K -> (cps* env exp K)
+    env (azexp:t exp src typ) K -> (cps* env exp K)
     )
 
   (define (cps* env exp K)
@@ -249,11 +249,11 @@
   ;; this is probably the wrong place/way to do this?
   ;; XXX might not be needed anymore because of the ref-ref pass.
   (define (frob-ref s)
-    (zexp:prim '%get (sexp:undef) (list (azexp:t (zexp:varref s) null-src))))
+    (zexp:prim '%get (sexp:undef) (list (azexp (zexp:varref s) null-src))))
 
   ;; This is the rounded-bracket ((X)) conversion from CwCC
   (define cps-tail
-    env (azexp:t exp src) k -> (cps-tail* env exp k)
+    env (azexp:t exp src typ) k -> (cps-tail* env exp k)
     )
 
   (define (cps-tail* env exp k)

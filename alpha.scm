@@ -27,8 +27,8 @@
       ))
 
   (define RA
-    env (azexp:t exp src)
-    -> (azexp:t (R src env exp) src)
+    env (azexp:t exp src typ)
+    -> (azexp:t (R src env exp) src typ)
     )
 
   ;; XXX do we need to pass src here?  how/where will we need it?  actually I think we
