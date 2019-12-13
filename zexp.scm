@@ -41,7 +41,7 @@
 
 ;; gaz literal
 (datatype zlit
-  (:int int)
+  (:none)
   (:big big)
   (:vec (vector zlit))
   )

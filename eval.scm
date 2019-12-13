@@ -49,7 +49,7 @@
           ))))
 
 (define zlit->zval
-  (zlit:int n) -> (zval:big (int->big n))
+  (zlit:none) -> (zval:big big/0) ;; ?
   (zlit:big n) -> (zval:big n)
   (zlit:vec subs) -> (zval:vec (vector-map zlit->zval subs))
   )

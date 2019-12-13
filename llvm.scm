@@ -95,10 +95,10 @@
     (define flit
       ftype? (type:vec size type) (zlit:vec subs)
       -> (format "<" (join (lambda (x) (flit #t type x)) ", " (vector->list subs)) ">")
-      ftype? ty (zlit:int n)
-      -> (format (if ftype? (format (ftype ty) " ") "") (int n))
       ftype? ty (zlit:big n)
       -> (format (if ftype? (format (ftype ty) " ") "") (big->dec n))
+      ftype? ty (zlit:none)
+      -> (raise (:LLVM/NoneLit))
       _ _ _
       -> (imp)
       )
@@ -397,8 +397,8 @@
 
     (define (format-lit ty lit)
       (match ty lit with
-        (type:int size) (zlit:int n)
-        -> (format (ftype ty) " " (int n))
+        (type:none) (zlit:none)
+        -> "void"
         (type:int size) (zlit:big n)
         -> (format (ftype ty) " " (big->dec n))
         (type:vec (itype:fix size) ty0) (zlit:vec subs)
