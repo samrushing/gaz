@@ -229,7 +229,7 @@
            ('-     (prim-binop "sub"))
            ('*     (prim-binop "mul"))
            ('/     (prim-binop "udiv"))
-           ('rem   (prim-binop "urem"))
+           ('mod   (prim-binop "urem"))
            ;; I think these need c-style names in order to avoid
            ;;   the obvious conflict with logical and/or/not.
            ('and   (prim-binop "and"))
