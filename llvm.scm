@@ -330,18 +330,25 @@
             -> (imp)
             ))
 
+        (define (type-as-suffix t)
+          (match t with
+            (type:int _) -> (ftype t)
+            (type:vec (itype:fix size) t) -> (format "v" (int size) (type-as-suffix t))
+            _ -> (raise (:LLVM/BadTypeForSuffix (type-repr t)))
+            ))
+
         (define (add-rotate-decl t right?)
           (let ((ft (ftype t)))
             (cmap/add
              decls
              (format "declare " ft "@llvm.fsh" (if right? "r." "l.")
-                     ft " (" ft ", " ft ", " ft ")"))))
+                     (type-as-suffix t) " (" ft ", " ft ", " ft ")"))))
 
         (define (prim-rotate right?)
           (lambda (param r tr args)
             (add-rotate-decl tr right?)
             (oprintf "  %" (safe r) " = call " (ftype tr) " @llvm."
-                     (if right? "fshr" "fshl") "." (ftype tr) " ("
+                     (if right? "fshr" "fshl") "." (type-as-suffix tr) " ("
                      ;; first argument twice.
                      (join valreft ", " (list:cons (first args) args)) ")\n")))
 
