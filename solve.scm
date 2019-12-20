@@ -186,13 +186,28 @@
     (var:t x tx) -> (format (sym x) ":" (type-repr tx))
     )
 
+  ;; identical to the one in solve-zexp.
+  (define Slit
+    ty (zlit:none)
+    -> (unify ty (type:none))
+    ty (zlit:big n)
+    -> (unify ty (type:int (new-itvar)))
+    ty (zlit:vec lits)
+    -> (let ((tv (new-tvar))
+             (tsz (itype:fix (vector-length lits))))
+         (printf "Slit vec ty=" (type-repr ty) " tsz=" (repr (itype->sexp tsz)) "\n")
+         (unify ty (type:vec tsz tv))
+         (for-vector lit lits
+           (printf "each lit\n")
+           (Slit tv lit))))
+
   (define (S env exp)
-    ;; (printf "S:\n")
+    (printf "S:\n")
     (match exp with
       (cps:prim name param (var:t x tx) xs K)
       -> (begin
-           ;; (printf "S prim " (sym name) " " (repr param) " " (sym x) ":" (repr (type->sexp tx))
-           ;;         " (" (join fvart " " xs) ")\n")
+           (printf "S prim " (sym name) " " (repr param) " " (sym x) ":" (repr (type->sexp tx))
+                   " (" (join fvart " " xs) ")\n")
          (match (alist/lookup prim-type-map name) with
            (maybe:yes fun)
            -> (let ((txs (map var->type xs)))
@@ -210,7 +225,10 @@
                 -> (raise (:TypeError (:UnknownPrim name)))
                 )))
       (cps:letval (var:t x tx) val K)
-      -> (S env K) ;; probably not sufficient
+      -> (begin
+           (printf "Slit " (type-repr tx) " ==? " (zlit-repr val) "\n")
+           (Slit tx val)
+           (S env K))
       (cps:letcont (cvar:t k) xs K0 K1)
       -> (let ((env0 (alist:entry k (map var->type xs) env)))
            ;; (printf "S letcont " (sym k) " (" (join fvart " " xs) ")\n")
@@ -322,16 +340,16 @@
     (R env '() formals))
 
   (define Slit
-    env ty (zlit:none)
+    ty (zlit:none)
     -> (unify ty (type:none))
-    env ty (zlit:big n)
+    ty (zlit:big n)
     -> (unify ty (type:int (new-itvar)))
-    env ty (zlit:vec lits)
+    ty (zlit:vec lits)
     -> (let ((tv (new-tvar))
              (tsz (itype:fix (vector-length lits))))
          (unify ty (type:vec tsz tv))
          (for-vector lit lits
-           (Slit env tv lit))))
+           (Slit tv lit))))
 
   (define (type-repr* t)
     (type-repr (apply-subst t)))
@@ -386,7 +404,7 @@
   (define S*
 
     env ty (zexp:lit lit)
-    -> (Slit env ty lit)
+    -> (Slit ty lit)
 
     env ty (zexp:prim name param args)
     -> (Sprim env ty name param args)
