@@ -113,6 +113,22 @@
   (= a b ...) -> (and (= a b) (= b ...))
   )
 
+(defmacro /
+  (/ a b)     -> (%prim / #f a b)
+  )
+
+(defmacro mod
+  (mod a b)     -> (%prim rem #f a b)
+  )
+
+(defmacro zext
+  (zext T x)    -> (%prim zext T x)
+  )
+
+(defmacro trunc
+  (trunc T x)   -> (%prim trunc T x)
+  )
+
 ;; [n-ary] comparison prims
 
 (defmacro %icmp-prim
