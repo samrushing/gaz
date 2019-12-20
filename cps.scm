@@ -101,7 +101,6 @@
   (define genvar (gensym "r"))
   (define gencont (gensym "L"))
   (define (newvar) (var:t (genvar) (make-tvar)))
-  (define (newintvar) (var:t (genvar) (make-itvar)))
   (define (newdead) (var:t (genvar) (type:none)))
   (define (newcont) (cvar:t (gencont)))
 
@@ -154,7 +153,7 @@
   (define (cps* env exp K)
     (match exp with
       (zexp:lit zlit)
-      -> (let ((x (newintvar)))
+      -> (let ((x (newvar)))
            (cps:letval x zlit (K x)))
       (zexp:varref s)
       -> (match (lookup-val env s) with
