@@ -139,7 +139,8 @@
 (defmacro <  (< a b ...)  -> (%icmp-prim < a b ...))
 (defmacro >  (> a b ...)  -> (%icmp-prim > a b ...))
 (defmacro =  (= a b ...)  -> (%icmp-prim = a b ...))
-(defmacro <> (<> a b ...) -> (%icmp-prim <> a b ...))
+;; note: tricky because <> indicates literal symbol.
+(defmacro <> (<<>> a b ...) -> (%icmp-prim <<>> a b ...))
 (defmacro <= (<= a b ...) -> (%icmp-prim <= a b ...))
 (defmacro >= (>= a b ...) -> (%icmp-prim >= a b ...))
 
