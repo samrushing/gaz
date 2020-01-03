@@ -46,7 +46,7 @@ amenable to formal proof and efficient code generation.
 The Gaz Language
 ----------------
 
-Gaz looks like a simplified scheme, but statically typed.  Currently,
+Gaz looks like a simplified Scheme, but statically typed.  Currently,
 it compiles to LLVM.
 
 The type system:

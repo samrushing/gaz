@@ -2,10 +2,6 @@
 
 ;; these macros form the bridge between 'gaz' and 'gaz core'.
 ;;
-;; some fun crypto-related things that might go in here:
-;;
-;; * the same, but with unrolling metadata.
-;;
 ;; top-level expressions are:
 ;; (%deflit name:type literal)
 ;; (%define name:type (arg0:type ...) body)

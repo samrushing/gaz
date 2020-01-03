@@ -209,10 +209,6 @@
   _ -> (maybe:no)
   )
 
-;; XXX Not sure that mucking about with mutable records to get
-;;   path compression is worth the hassle.  We should probably
-;;   just use a map-based subst and be less clever.
-
 ;; type-find & type-union are quasi-polymorphic in that
 ;;  they will work on either a `type` or an `itype` depending
 ;;  on the maybe-predicate passed to them.
