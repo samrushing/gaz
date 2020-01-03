@@ -58,6 +58,21 @@
     otherwise                      -> (maybe:no)
     ))
 
+;; modified version of is-form? from below.  XXX merge these if possible.
+(define (test-form exp name)
+  (match (unpack-ann exp) with
+    (:tuple ann0 (sexp:list (hd . tl)))
+    -> (match (unpack-ann hd) with
+         (:tuple ann1 (sexp:symbol sym))
+         -> (if (eq? name sym)
+                (:tuple #t ann1 (sexp:list tl))
+                (:tuple #f ann1 (sexp:list (list:cons hd tl))))
+         (:tuple ann1 other)
+         -> (:tuple #f ann1 other))
+    (:tuple ann0 other)
+    -> (:tuple #f ann0 other)
+    ))
+
 ;; apply all known macros to <exp>.
 ;; this carefully unwraps and rewraps src annotations,
 ;;   while also handling the annotations added by macro/expand.
@@ -575,14 +590,23 @@
       -> (raise (:SyntaxError ann (sexp:list exps)))
       ))
 
+  ;; what we expect here: either an int, or a vector of RECUR,
+  ;; and in each case, annotated.  We shouldn't just strip the annotation,
+  ;; since there might be a flub on line 15 of a 30-line constant.
+  ;; so, at each call, we expect either:
+  ;; X := (ANN ((ANN %int) (ANN <base>) (ANN <string>)))
+  ;;    | (ANN #(X ...))
+
   (define (sexp->zlit ann exp)
-    (define R
-      (sexp:list ((sexp:symbol '%ann) ann exp)) -> (sexp->zlit ann exp)
-      (sexp:list ((sexp:symbol '%int) . tl)) -> (big->zlit ann tl)
-      (sexp:int n)       -> (zlit:big (int->big n))
-      (sexp:vector subs) -> (zlit:vec (list->vector (map R subs)))
-      other              -> (raise (:SyntaxError ann other))
-      )
+    (define (R exp)
+      (match (test-form exp '%int) with
+        (:tuple #t ann0 (sexp:list base-and-lit))
+        -> (big->zlit ann0 (map remove-annotations base-and-lit))
+        (:tuple #f ann0 (sexp:vector subs))
+        -> (zlit:vec (list->vector (map R subs)))
+        _
+        -> (raise (:SyntaxError ann exp))
+        ))
     (R exp))
 
   (define (parse-lit ann exps)
