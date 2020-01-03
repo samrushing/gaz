@@ -118,7 +118,7 @@
   )
 
 (defmacro mod
-  (mod a b)     -> (%prim rem #f a b)
+  (mod a b)     -> (%prim mod #f a b)
   )
 
 (defmacro zext
