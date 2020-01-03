@@ -28,7 +28,7 @@
   (define fvart  (var:t x t) -> (format (ansi green (sym x)) ":" (ftype t)))
   (define fvar   (var:t x t) -> (format (ansi green (sym x))))
   (define fcvar  (cvar:t x)  -> (format (ansi magenta (sym x))))
-  (define ftype t            -> (format (ansi yellow (repr (type->sexp (apply-subst t))))))
+  (define ftype t            -> (format (ansi yellow (type-repr (apply-subst t)))))
   (define fname n            -> (format (ansi cyan (sym n))))
   (printf (repeat d "  "))
   (match exp with
