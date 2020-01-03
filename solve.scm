@@ -5,13 +5,6 @@
 (define (type=? ta tb)
   (magic=? ta tb))
 
-;; is this type suitable for arithmetic ops?
-(define arith?
-  (type:int _)              -> #t
-  (type:vec _ (type:int _)) -> #t
-  _                         -> #f
-  )
-
 ;; NOTE: these schemes don't capture the need for int/vec types.
 ;;
 ;; to think about: the solver might want to be more like irken's,
