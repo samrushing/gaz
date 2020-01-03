@@ -259,3 +259,8 @@
       (begin body0 ...)
       (begin body1 ...)
       ))
+
+(defmacro shuffle
+  (shuffle v0 mask)    -> (%prim shufv #f v0 mask)
+  (shuffle v0 v1 mask) -> (%prim shufv #f v0 v1 mask)
+  )

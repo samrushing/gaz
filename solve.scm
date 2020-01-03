@@ -148,13 +148,36 @@
   -> (raise (:TypeError (:Arity argtypes)))
   )
 
+;; v0 and v1 are the same vector type/size
+;; m is a vector of i32
+;; rtype is a vector |m| with type of v0/v1 elems.
+(define sig-shufv
+  param rtype (v0 v1 m)
+  -> (let ((item-type (new-tvar))
+           (mask-size (new-itvar)))
+       (unify v0 (type:vec btype-true (new-itvar) item-type))
+       (unify v0 v1)
+       (unify m (type:vec btype-true mask-size i32))
+       (unify rtype (type:vec btype-true mask-size item-type))
+       )
+  param rtype (v0 m)
+  -> (let ((item-type (new-tvar))
+           (mask-size (new-itvar)))
+       (unify v0 (type:vec btype-true (new-itvar) item-type))
+       (unify m (type:vec btype-true mask-size i32))
+       (unify rtype (type:vec btype-true mask-size item-type))
+       )
+  _ _ _
+  -> (raise (:TypeError (:BadArgs "shuffle")))
+  )
+
 (define prim-type-map
   (alist/make
    ('+     sig-prim-arith)
    ('-     sig-prim-arith)
    ('*     sig-prim-arith)
    ('/     sig-prim-arith)
-   ('rem   sig-prim-arith)
+   ('mod   sig-prim-arith)
    ('and   sig-prim-arith)
    ('or    sig-prim-arith)
    ('xor   sig-prim-arith)
@@ -175,6 +198,7 @@
    ('zext  (sig-change-size #t))
    ('trunc (sig-change-size #f))
    ('alloca sig-alloca)
+   ('shufv sig-shufv)
    ))
 
 ;; solve types for a CPS exp

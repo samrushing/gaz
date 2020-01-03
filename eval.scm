@@ -252,6 +252,31 @@
         (zval:vec rvec)
         ))
 
+    (define zval->int
+      (zval:big n) -> (big->int n)
+      _ -> (impossible)
+      )
+
+    (define prim-shufv
+      t ((:tuple tv0 (zval:vec v0)) (:tuple tv1 (zval:vec v1)) (:tuple tm (zval:vec m)))
+      -> (let ((vlen (vector-length v0))
+               (mlen (vector-length m))
+               (rvec (make-vector mlen (zval:big big/0))))
+           (for-range i mlen
+             (let ((j (zval->int m[i])))
+               (if (< j vlen)
+                   (set! rvec[i] v0[j])
+                   (set! rvec[i] v1[(- j vlen)]))))
+           (zval:vec rvec))
+      t ((:tuple tv0 (zval:vec v0)) (:tuple tm (zval:vec m)))
+      -> (let ((mlen (vector-length m))
+               (rvec (make-vector mlen (zval:big big/0))))
+           (for-range i mlen
+             (set! rvec[i] v0[(zval->int m[i])]))
+           (zval:vec rvec))
+      t args -> (impossible)
+      )
+
     (define prim-get
       t ((:tuple tv (zval:ref r))) -> r.cell
       t ((:tuple tv (zval:vref {cell=(zval:vec v)} i))) -> v[i]
@@ -324,6 +349,7 @@
        ('xor   (prim-logop logxor))
        ('or    (prim-logop logior))
        ('and   (prim-logop logand))
+       ('shufv prim-shufv)
        ('%get  prim-get)
        ('%set! prim-set)
        ('%vref prim-vref)

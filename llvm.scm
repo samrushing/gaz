@@ -241,6 +241,7 @@
            ('zext   prim-zext)
            ('trunc  prim-trunc)
            ('alloca prim-alloca)
+           ('shufv  prim-shufv)
            ))
 
         (define (prim-binop op)
@@ -343,6 +344,16 @@
                      (if right? "fshr" "fshl") "." (type-as-suffix tr) " ("
                      ;; first argument twice.
                      (join valreft ", " (list:cons (first args) args)) ")\n")))
+
+        (define (prim-shufv param r tr args)
+          (match args with
+            (v0 v1 m)
+            -> (oprintf "  %" (safe r) " = shufflevector " (valreft v0) ", " (valreft v1) ", " (valreft m) "\n")
+            (v0 m)
+            -> (oprintf "  %" (safe r) " = shufflevector " (valreft v0) ", " (ftype (var/type v0)) " undef, " (valreft m) "\n")
+            _
+            -> (imp)
+            ))
 
         (define var->type
           (var:t _ type) -> (apply-subst type)
