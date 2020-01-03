@@ -30,7 +30,7 @@
   -> (format "|" (zval-repr type r.cell) "|")
   (type:mut type) (zval:ref r)
   -> (format "<" (zval-repr type r.cell) ">")
-  (type:vec _ ty) (zval:vec xs)
+  (type:vec _ _ ty) (zval:vec xs)
   -> (format "#(" (join (partial (zval-repr ty _)) " " (vector->list xs)) ")")
   (type:ref type) (zval:vref r index)
   -> (format (zval-repr type r.cell) "[" (int index) "]")
@@ -156,7 +156,7 @@
         (match type args with
           (type:int _) ((:tuple ta (zval:big a)) (:tuple tb (zval:big b)))
           -> (prim-int-icmp cmp-val inv? a b)
-          (type:vec size ty) ((:tuple ta (zval:vec va)) (:tuple tb (zval:vec vb)))
+          (type:vec v? size ty) ((:tuple ta (zval:vec va)) (:tuple tb (zval:vec vb)))
           -> (prim-vec-icmp cmp-val inv? va vb)
           _ args
           -> (raise (:Eval/BadArgs args))
@@ -210,7 +210,7 @@
         (match rtype args with
           (type:int (itype:fix bits)) ((:tuple ta (zval:big a)) (:tuple tb (zval:big b)))
           -> (prim-int-binop op bits a b)
-          (type:vec size (type:int (itype:fix bits))) ((:tuple ta (zval:vec a)) (:tuple tb (zval:vec b)))
+          (type:vec v? size (type:int (itype:fix bits))) ((:tuple ta (zval:vec a)) (:tuple tb (zval:vec b)))
           -> (prim-vec-binop op bits a b)
           _ _ -> (raise (:Eval/Arity args))
           )))
@@ -234,7 +234,7 @@
         (match rtype args with
           (type:int (itype:fix bits)) ((:tuple ta (zval:big a)) (:tuple tb (zval:big b)))
           -> (prim-int-logop op bits a b)
-          (type:vec size (type:int (itype:fix bits))) ((:tuple ta (zval:vec a)) (:tuple tb (zval:vec b)))
+          (type:vec v? size (type:int (itype:fix bits))) ((:tuple ta (zval:vec a)) (:tuple tb (zval:vec b)))
           -> (prim-vec-logop op bits a b)
           _ _ -> (raise (:Eval/Arity args))
           )))
@@ -283,11 +283,11 @@
       (type:int _) -> (zval:big big/0)
       (type:ref t) -> (zval:ref {cell=(build-type t)})
       (type:mut t) -> (zval:ref {cell=(build-type t)})
-      (type:vec (itype:fix size) t) -> (zval:vec
-                                        (list->vector
-                                         (map
-                                          (lambda (x) (build-type t))
-                                          (range size))))
+      (type:vec v? (itype:fix size) t) -> (zval:vec
+                                           (list->vector
+                                            (map
+                                             (lambda (x) (build-type t))
+                                             (range size))))
       t -> (raise (:Eval/BadType t))
       )
 

@@ -73,27 +73,21 @@
         (local '()))
 
     ;; format a type for llvm.
-    (define (ftype* asvec? t)
-      (match asvec? (apply-subst t) with
-        #t (type:vec (itype:fix s) t) -> (format "<" (int s) " x " (ftype* #f t) ">")
-        #f (type:vec (itype:fix s) t) -> (format "[" (int s) " x " (ftype* #f t) "]")
-        _  (type:int (itype:fix w))   -> (format "i" (int w))
-        _  (type:ref t)               -> (format (ftype* #f t) "*")
-        _  (type:mut t)               -> (format (ftype* #f t) "*")
-        _  (type:none)                -> "void"
-        _  _                          -> (raise (:BadLLVMType (repr (type->sexp t))))
-        ))
-
     (define (ftype t)
-      (ftype* #t t))
-
-    (define (ftypenv t)
-      (ftype* #f t))
+      (match (apply-subst t) with
+         (type:vec (itype:fix 1) (itype:fix s) t) -> (format "<" (int s) " x " (ftype t) ">")
+         (type:vec _             (itype:fix s) t) -> (format "[" (int s) " x " (ftype t) "]")
+         (type:int (itype:fix w)) -> (format "i" (int w))
+         (type:ref t)             -> (format (ftype t) "*")
+         (type:mut t)             -> (format (ftype t) "*")
+         (type:none)              -> "void"
+         _                        -> (raise (:BadLLVMType (repr (type->sexp t))))
+        ))
 
     ;; for valref[t] (i.e., 'immediate' literals).
     ;; compare format-lit below.
     (define flit
-      ftype? (type:vec size type) (zlit:vec subs)
+      ftype? (type:vec _ size type) (zlit:vec subs)
       -> (format "<" (join (lambda (x) (flit #t type x)) ", " (vector->list subs)) ">")
       ftype? ty (zlit:big n)
       -> (format (if ftype? (format (ftype ty) " ") "") (big->dec n))
@@ -166,7 +160,7 @@
           (var:t x tx)
           -> (match (alist/lookup venv x) with
                ;; special case for vector literals
-               (maybe:yes (:tuple (type:vec size tv) v)) -> (flit #t (type:vec size tv) v)
+               ;;(maybe:yes (:tuple (type:vec v? size tv) v)) -> (flit #t (type:vec v? size tv) v)
                (maybe:yes (:tuple tv v)) -> (format (ftype tv) " " (flit #f tv v))
                (maybe:no)
                -> (match (alist/lookup tenv x) with
@@ -290,7 +284,7 @@
             ((var:t vec tvec) index)
             -> (let ((index0 (maybe-unsign-index index)))
                  (oprintf "  %" (safe r) " = getelementptr "
-                          (ftypenv (ref/mut->type tvec)) ", "
+                          (ftype (ref/mut->type tvec)) ", "
                           (valreft (first args))
                           ", i32 0, " index0 "\n"))
             _ -> (imp)
@@ -299,9 +293,9 @@
         (define (prim-%get param r tr args)
           (match args with
             ((var:t p (type:ref tp)))
-            -> (oprintf "  %" (safe r) " = load " (ftypenv tp) ", " (ftypenv tp) "* " (valref (first args)) "\n")
+            -> (oprintf "  %" (safe r) " = load " (ftype tp) ", " (ftype tp) "* " (valref (first args)) "\n")
             ((var:t p (type:mut tp)))
-            -> (oprintf "  %" (safe r) " = load " (ftypenv tp) ", " (ftypenv tp) "* " (valref (first args)) "\n")
+            -> (oprintf "  %" (safe r) " = load " (ftype tp) ", " (ftype tp) "* " (valref (first args)) "\n")
             _
             -> (imp)
             ))
@@ -323,17 +317,15 @@
             ))
 
         (define (prim-alloca param r tr args)
-          (match (parse-type param) args with
-            type ()
-            -> (oprintf "  %" (safe r) " = alloca " (ftypenv type) ", i32 1\n")
-            _ _
-            -> (imp)
-            ))
+          ;; no need to parser/verify param again, we've already checked it against the
+          ;;  result type.
+          (oprintf "  %" (safe r) " = alloca " (ftype (ref/mut->type tr)) ", i32 1\n")
+          )
 
         (define (type-as-suffix t)
           (match t with
             (type:int _) -> (ftype t)
-            (type:vec (itype:fix size) t) -> (format "v" (int size) (type-as-suffix t))
+            (type:vec _ (itype:fix size) t) -> (format "v" (int size) (type-as-suffix t))
             _ -> (raise (:LLVM/BadTypeForSuffix (type-repr t)))
             ))
 
@@ -408,7 +400,7 @@
         -> "void"
         (type:int size) (zlit:big n)
         -> (format (ftype ty) " " (big->dec n))
-        (type:vec (itype:fix size) ty0) (zlit:vec subs)
+        (type:vec v? (itype:fix size) ty0) (zlit:vec subs)
         -> (if (= size (vector-length subs))
                (format "[" (int size) " x " (ftype ty0) "] ["
                        (join (partial (format-lit ty0 _)) ", " (vector->list subs)) "]")

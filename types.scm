@@ -27,26 +27,45 @@
   (:var (tvar itype))
   )
 
+;; note: vector? is a 'boolean itype'.  in other words, it's an
+;;  'itype' that is used as a boolean (0, 1, or ?).  The alternative
+;;  is to provide yet another 'kind', and needlessly complicate
+;;  type-find, type-union, etc.
+;;
+;; its purpose is to identify when vectors are used in vector-like
+;;  ways [versus pointer-to-array ways] so we don't have to push that
+;;  llvm distinction all the way up into the gaz language.
+
 (datatype type
   (:none)
-  (:int itype)
-  (:vec itype type)
-  (:arrow type (list type))
-  (:ref type) ;; constant reference
-  (:mut type) ;; mutable reference
-  (:var (tvar type))
+  (:int itype)              ;; integer, size
+  (:vec itype itype type)   ; vector?, size, type.
+  (:arrow type (list type)) ;; rtype, argtypes
+  (:ref type)               ;; constant reference
+  (:mut type)               ;; mutable reference
+  (:var (tvar type))        ;; type variable.
   )
 
+;; itype used as a boolean
+(define btype-repr
+  (itype:fix 0) -> "#F"
+  (itype:fix _) -> "#T"
+  (itype:var _) -> "?"
+  )
+
+(define btype-true  (itype:fix 1))
+(define btype-false (itype:fix 0))
+
 (define type-repr
-  (type:none)                           -> "none"
-  (type:int (itype:fix n))              -> (format "i" (int n))
-  (type:int (itype:var (tvar:t n _)))   -> (format "(int '" (int n) ")")
-  (type:vec (itype:fix n) t)            -> (format "(vec " (int n) " " (type-repr t) ")")
-  (type:vec (itype:var (tvar:t n _)) t) -> (format "(vec '" (int n) " " (type-repr t) ")")
-  (type:arrow rt txs)                   -> (format "(" (join type-repr " " txs) " -> " (type-repr rt) ")")
-  (type:ref t)                          -> (format "(ref " (type-repr t) ")")
-  (type:mut t)                          -> (format "(mut " (type-repr t) ")")
-  (type:var (tvar:t n _))               -> (format "'" (int n))
+  (type:none)                              -> "none"
+  (type:int (itype:fix n))                 -> (format "i" (int n))
+  (type:int (itype:var (tvar:t n _)))      -> (format "(int '" (int n) ")")
+  (type:vec v? (itype:fix n) t)            -> (format "(vec " (btype-repr v?) " " (int n) " " (type-repr t) ")")
+  (type:vec v? (itype:var (tvar:t n _)) t) -> (format "(vec " (btype-repr v?) " '" (int n) " " (type-repr t) ")")
+  (type:arrow rt txs)                      -> (format "(" (join type-repr " " txs) " -> " (type-repr rt) ")")
+  (type:ref t)                             -> (format "(ref " (type-repr t) ")")
+  (type:mut t)                             -> (format "(mut " (type-repr t) ")")
+  (type:var (tvar:t n _))                  -> (format "'" (int n))
   )
 
 (define (type/var i)
@@ -97,7 +116,7 @@
 (define type->sexp
   (type:int (itype:fix n)) -> (sexp:symbol (string->symbol (format "i" (int n))))
   (type:int it)     -> (sexp (sym 'int) (itype->sexp it))
-  (type:vec s t)    -> (sexp (sym 'vec) (size->sexp s) (type->sexp t))
+  (type:vec v? s t) -> (sexp (sym 'vec) (itype->sexp v?) (size->sexp s) (type->sexp t))
   (type:ref t)      -> (sexp (sym 'ref) (type->sexp t))
   (type:mut t)      -> (sexp (sym 'mut) (type->sexp t))
   (type:var tv)     -> (tvar->sexp tv)
@@ -124,7 +143,7 @@
       )
 
     (define P
-      (sexp:list ((sexp:symbol 'vec) size type))              -> (type:vec (parse-size size) (P type))
+      (sexp:list ((sexp:symbol 'vec) size type))              -> (type:vec (new-itvar) (parse-size size) (P type))
       (sexp:list ((sexp:symbol 'ref) type))                   -> (type:ref (P type))
       (sexp:list ((sexp:symbol 'mut) type))                   -> (type:mut (P type))
       (sexp:list ((sexp:symbol 'arrow) rtype (sexp:list ts))) -> (type:arrow (P rtype) (map P ts))
@@ -165,12 +184,12 @@
 
     (define (W t)
       (match t with
-        (type:none)           -> t
-        (type:int itype)      -> (type:int (Wi itype))
-        (type:vec size base)  -> (type:vec (Wi size) (W base))
-        (type:arrow rt argts) -> (type:arrow (W rt) (map W argts))
-        (type:ref t)          -> (type:ref (W t))
-        (type:mut t)          -> (type:mut (W t))
+        (type:none)             -> t
+        (type:int itype)        -> (type:int (Wi itype))
+        (type:vec v? size base) -> (type:vec v? (Wi size) (W base)) ;; note: bool-itvar
+        (type:arrow rt argts)   -> (type:arrow (W rt) (map W argts))
+        (type:ref t)            -> (type:ref (W t))
+        (type:mut t)            -> (type:mut (W t))
         (type:var (tvar:t i r))
         -> (match (tree/member tvm int-cmp i) with
              (maybe:yes tv) -> tv
@@ -254,17 +273,18 @@
         )))
 
   (define (U t0 t1)
-    ;; (printf "U  " (sexp (type->sexp t0)) " " (sexp (type->sexp t1)) "\n")
+    (printf "U  " (sexp (type->sexp t0)) " " (sexp (type->sexp t1)) "\n")
     (let ((u (type-find type-isvar? t0))
           (v (type-find type-isvar? t1)))
+      (printf "U* " (type-repr u) " " (type-repr v) "\n")
       (when (not (eq? u v))
         (match u v with
           (type:none) (type:none)
           -> #u
           (type:int nu) (type:int nv)
           -> (U-itype nu nv)
-          (type:vec nu tu) (type:vec nv tv)
-          -> (begin (U-itype nu nv) (U tu tv))
+          (type:vec v0? nu tu) (type:vec v1? nv tv)
+          -> (begin (U-itype v0? v1?) (U-itype nu nv) (U tu tv))
           (type:arrow ru argsu) (type:arrow rv argsv)
           -> (begin (U ru rv) (for-each2 U argsu argsv))
           (type:ref tu) (type:ref tv)
@@ -289,7 +309,7 @@
     (let ((t0 (type-find type-isvar? t)))
       (match t0 with
         (type:int n)        -> (type:int (pi n))
-        (type:vec n vt)     -> (type:vec (pi n) (p vt))
+        (type:vec v? n vt)  -> (type:vec (pi v?) (pi n) (p vt))
         (type:arrow rt ats) -> (type:arrow (p rt) (map p ats))
         (type:ref rt)       -> (type:ref (p rt))
         (type:mut rt)       -> (type:mut (p rt))

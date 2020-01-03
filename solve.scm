@@ -26,18 +26,31 @@
 (define (ftype t)
   (type-repr (apply-subst t)))
 
+;; assert that <t> is a vector type (as opposed to llvm array)
+(define (vector-check t)
+  (match (apply-subst t) with
+    (type:vec v? size base)
+    -> (unify t (type:vec (itype:fix 1) size base))
+    _
+    -> #u
+    ))
+
 ;; verify all args are arith and the same. returns that type.
 (define sig-prim-arith
   param rtype args
   -> (begin
-       ;; (printf "U arith (" (join ftype ", " args) ") -> " (ftype rtype) "\n")
-       (for-list arg args (unify rtype arg)))
-  )
+       (printf "U arith (" (join ftype ", " args) ") -> " (ftype rtype) "\n")
+       (for-list arg args (unify rtype arg))
+       (vector-check rtype)))
 
 ;; verify all args are arith and the same.  returns i1.
 (define sig-prim-cmp
   param rtype (targ0 targ1)
-  -> (begin (unify rtype i1) (unify targ0 targ1))
+  -> (begin
+       (unify rtype i1)
+       (unify targ0 targ1)
+       (vector-check rtype)
+       (vector-check targ0))
   param rtype targs
   -> (raise (:TypeError (:Arity targs)))
   )
@@ -70,7 +83,7 @@
   )
 
 (define sig-vref
-  param rtype ((type:ref (type:vec size t0)) tindex)
+  param rtype ((type:ref (type:vec v? size t0)) tindex)
   -> (begin
        ;; we want to express that tindex is an integer type, but
        ;;  there's no way to do that now.  The i0 hack does not work.
@@ -78,12 +91,12 @@
        (unify tindex (type:int (new-itvar)))
        (unify (type:ref t0) rtype)
        )
-  param rtype ((type:mut (type:vec size t0)) tindex)
+  param rtype ((type:mut (type:vec v? size t0)) tindex)
   -> (begin
        (unify tindex (type:int (new-itvar)))
        (unify (type:mut t0) rtype)
        )
-  param rtype ((type:vec size t0) tindex)
+  param rtype ((type:vec v? size t0) tindex)
   -> (begin
        (unify tindex (type:int (new-itvar)))
        (unify rtype t0)
@@ -196,7 +209,7 @@
     -> (let ((tv (new-tvar))
              (tsz (itype:fix (vector-length lits))))
          (printf "Slit vec ty=" (type-repr ty) " tsz=" (repr (itype->sexp tsz)) "\n")
-         (unify ty (type:vec tsz tv))
+         (unify ty (type:vec (new-itvar) tsz tv)) ;; XXX bvar
          (for-vector lit lits
            (printf "each lit\n")
            (Slit tv lit))))
@@ -293,10 +306,10 @@
 (define (default-vec-index exp index-type)
 
   (define W
-    (cps:prim '%vref _ _ (src index) K)
-    -> (match index with
-         (var:t _ (type:int (itype:var _)))
-         -> (begin (unify (var/type index) index-type) (W K))
+    (cps:prim '%vref _ _ (src (var:t i ti)) K)
+    -> (match (apply-subst ti) with
+         (type:int (itype:var _))
+         -> (begin (unify ti index-type) (W K))
          _
          -> (W K)
          )
@@ -347,7 +360,7 @@
     ty (zlit:vec lits)
     -> (let ((tv (new-tvar))
              (tsz (itype:fix (vector-length lits))))
-         (unify ty (type:vec tsz tv))
+         (unify ty (type:vec (new-itvar) tsz tv))
          (for-vector lit lits
            (Slit tv lit))))
 

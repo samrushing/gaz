@@ -312,9 +312,9 @@
     walk src env type (zexp:varref n)
     -> (match (alist/lookup env n) with
          ;; leave (ref (vec ...)) alone.
-         (maybe:yes (type:ref (type:vec _ _)))
+         (maybe:yes (type:ref (type:vec _ _ _)))
          -> (zexp:varref n)
-         (maybe:yes (type:mut (type:vec _ _)))
+         (maybe:yes (type:mut (type:vec _ _ _)))
          -> (zexp:varref n)
          ;; is this a ref type? if so, replace it with (%get x)
          (maybe:yes (type:ref t))
