@@ -97,7 +97,7 @@ Building and Running
 --------------------
 
 You need [Irken](https://github.com/samrushing/irken-compiler)
-(November 2026 or later).
+(November 2026 or later; the evaluator needs the `big-rshift` fix).
 
     $ irken gaz.scm
     $ ./gaz tests/sha256.scm          # writes tests/sha256.ll

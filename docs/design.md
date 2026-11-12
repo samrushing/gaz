@@ -318,9 +318,11 @@ a branch.  Also, "no branching" is too strict as stated: rejection
 sampling loops on public data, and ML-DSA signing retries by design.
 The rule is "no branching on secrets".
 
-A field-element type whose `+` and `*` map to named functions (the
-`define-type-operators` idea in `notes/bmint.txt`) would let point
-formulas be written as they appear in papers.
+A field-element type whose `+` and `*` map to named functions would let
+point formulas be written as they appear in papers.  The simplest
+mechanism is a declaration per type that maps each operator to a
+function (`(define-type-operators fe  + fe-add  * fe-mul ...)`), rather
+than anything as general as type classes.
 
 ## Verification
 
@@ -351,8 +353,6 @@ A verified compiler is out of scope.
   share one table.
 - `unify` takes an environment argument that it does not use.
 - `two**n` in `eval.scm` computes 2^(n+1).  Its one use is unaffected.
-- The evaluator works around a `big-rshift` failure in Irken's
-  `lib/bignum.scm` (`big-rshift*`).
 
 ## Order of work
 

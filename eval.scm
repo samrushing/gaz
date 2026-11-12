@@ -101,18 +101,10 @@
     (big:zero)   -> (big:zero)
   ))
 
-;; lib/bignum's `big-rshift` fails (vector index out of range) when the
-;;  shift is wider than the number, e.g. (big-rshift 3 63).  our values are
-;;  never negative, so anything below 2^shift shifts to zero.
-(define (big-rshift* n shift)
-  (if (eq? (cmp:<) (big-cmp n (big-lshift big/1 shift)))
-      (big:zero)
-      (big-rshift n shift)))
-
 (define (big-rotl n shift bits)
   (big-add
    (big-lshift n shift)
-   (big-rshift* n (- bits shift))))
+   (big-rshift n (- bits shift))))
 
 (define (big-rotr n shift bits)
   (big-rotl n (- bits shift) bits))
@@ -194,7 +186,7 @@
           '/   -> (big-quo a b)
           'mod -> (big-rem a b)
           '<<  -> (big-lshift a (big->int b))
-          '>>  -> (big-rshift* a (big->int b))
+          '>>  -> (big-rshift a (big->int b))
           '<<< -> (big-rotl a (big->int b) bits)
           '>>> -> (big-rotr a (big->int b) bits)
           _    -> (raise (:Eval "UnknownIntBinPrimop" (format (sym op))))
