@@ -101,10 +101,18 @@
     (big:zero)   -> (big:zero)
   ))
 
+;; lib/bignum's `big-rshift` fails (vector index out of range) when the
+;;  shift is wider than the number, e.g. (big-rshift 3 63).  our values are
+;;  never negative, so anything below 2^shift shifts to zero.
+(define (big-rshift* n shift)
+  (if (eq? (cmp:<) (big-cmp n (big-lshift big/1 shift)))
+      (big:zero)
+      (big-rshift n shift)))
+
 (define (big-rotl n shift bits)
   (big-add
    (big-lshift n shift)
-   (big-rshift n (- bits shift))))
+   (big-rshift* n (- bits shift))))
 
 (define (big-rotr n shift bits)
   (big-rotl n (- bits shift) bits))
@@ -184,9 +192,9 @@
           '-   -> (big-sub a b)
           '*   -> (big-mul a b)
           '/   -> (big-quo a b)
-          'rem -> (big-rem a b)
+          'mod -> (big-rem a b)
           '<<  -> (big-lshift a (big->int b))
-          '>>  -> (big-rshift a (big->int b))
+          '>>  -> (big-rshift* a (big->int b))
           '<<< -> (big-rotl a (big->int b) bits)
           '>>> -> (big-rotr a (big->int b) bits)
           _    -> (raise (:Eval "UnknownIntBinPrimop" (format (sym op))))
@@ -343,6 +351,14 @@
       env ty _   -> (impossible)
       )
 
+    ;; zext and trunc: the value, reduced to the width of the result type.
+    (define prim-resize
+      env (type:int (itype:fix bits)) ((:tuple ta (zval:big a)))
+      -> (zval:big (twos-canon bits a))
+      env t args
+      -> (raise (:Eval "zext/trunc: Bad Args" ""))
+      )
+
     (define prim-alist
       (alist/make
        ('=     (prim-icmp (cmp:=) #f))
@@ -355,7 +371,9 @@
        ('-     (prim-binop '-))
        ('*     (prim-binop '*))
        ('/     (prim-binop '/))
-       ('rem   (prim-binop 'rem))
+       ('mod   (prim-binop 'mod))
+       ('zext  prim-resize)
+       ('trunc prim-resize)
        ('<<    (prim-binop '<<))
        ('>>    (prim-binop '>>))
        ('>>>   (prim-binop '>>>))
