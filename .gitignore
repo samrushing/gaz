@@ -1,2 +1,11 @@
 intermediate/
 sexp-match/
+*~
+.DS_Store
+a.out
+/gaz
+/gaz.s
+/gaz.c
+/gaz.byc
+/gaz-basis.ll
+tests/*.ll
