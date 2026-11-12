@@ -63,7 +63,50 @@ The type system:
 Sample Code
 -----------
 
-[Something small here, like xoroshiro or nearly-divisionless]
+The xoroshiro128+ random number generator (`tests/xoroshiro.scm`):
+
+    ```scheme
+    (define (xoroshiro128+:i64 s:(mut (vec 2 i64)))
+      (let ((s0:i64 s[0])
+            (s1:i64 s[1])
+            (p:i64 (+ s0 s1))
+            (x:i64 (xor s0 s1)))
+        (set! s[0] (xor (<<< s0 24) x (<< x 16)))
+        (set! s[1] (<<< x 37))
+        p))
+    ```
+
+`name:type` declares a typed name, `s[0]` indexes a vector, `<<<` is
+rotate-left.  A `let` binding is immutable; only a `(mut ...)` can be
+assigned.  The other tests are SHA-256, Keccak-f, ChaCha20, an AES
+S-box generator and the beginnings of a constant-time bignum.
+
+Status
+------
+
+Experimental.  Written in 2019-20, revived in November 2026.  The
+language and its LLVM backend work on the programs in `tests/`; the
+parts that would make it a real language for cryptography (a backend
+that guarantees constant time, secrecy types, runtime-sized vectors) are
+designed but not built.  See [docs/design.md](docs/design.md) for where
+things stand and where they are going.
+
+Do not use this for anything that matters.
+
+Building and Running
+--------------------
+
+You need [Irken](https://github.com/samrushing/irken-compiler)
+(November 2026 or later).
+
+    $ irken gaz.scm
+    $ ./gaz tests/sha256.scm          # writes tests/sha256.ll
+    $ ./gaz -eval tests/sha256.scm    # run `main` in the evaluator
+    $ python3 tests/run.py            # run the tests
+
+Run `gaz` from this directory: it reads `gaz-basis.scm` from the current
+directory.  `-v` shows the program after each pass; `-d` also traces the
+type solvers, the rewriter and the evaluator.
 
 
 Compilation
