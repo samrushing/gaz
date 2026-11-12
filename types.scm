@@ -108,26 +108,26 @@
   )
 
 (define itype->sexp
-  (itype:fix n)    -> (sexp:symbol (string->symbol (format "i" (int n))))
+  (itype:fix n)    -> (sexp:symbol (string->symbol (format "i" (int n))) null-src)
   (itype:var tv)   -> (tvar->sexp tv)
-  (itype:dyn name) -> (sexp:symbol name)
+  (itype:dyn name) -> (sexp:symbol name null-src)
   )
 
 (define size->sexp
-  (itype:fix n)    -> (sexp:int n)
+  (itype:fix n)    -> (sexp:int n null-src)
   (itype:var tv)   -> (tvar->sexp tv)
-  (itype:dyn name) -> (sexp:symbol name)
+  (itype:dyn name) -> (sexp:symbol name null-src)
   )
 
 (define type->sexp
-  (type:int (itype:fix n)) -> (sexp:symbol (string->symbol (format "i" (int n))))
+  (type:int (itype:fix n)) -> (sexp:symbol (string->symbol (format "i" (int n))) null-src)
   (type:int it)     -> (sexp (sym 'int) (itype->sexp it))
   (type:vec v? s t) -> (sexp (sym 'vec) (itype->sexp v?) (size->sexp s) (type->sexp t))
   (type:ref t)      -> (sexp (sym 'ref) (type->sexp t))
   (type:mut t)      -> (sexp (sym 'mut) (type->sexp t))
   (type:var tv)     -> (tvar->sexp tv)
   (type:arrow r xs) -> (sexp (sym '->) (type->sexp r) (list (map type->sexp xs)))
-  (type:none)       -> (sexp:symbol 'none)
+  (type:none)       -> (sexp:symbol 'none null-src)
   )
 
 (define (parse-type sexp)
@@ -135,34 +135,34 @@
   (let ((tvarmap (cmap/make symbol-index-cmp)))
 
     (define parse-size
-      (sexp:int size)
+      (sexp:int size _)
       -> (itype:fix size)
-      (sexp:list ((sexp:symbol '%int) (sexp:int 10) (sexp:string digits)))
+      (sexp:list ((sexp:symbol '%int _) (sexp:int 10 _) (sexp:string digits _)) _)
       -> (itype:fix (string->int digits))
-      (sexp:list ((sexp:symbol 'quote) (sexp:symbol x)))
+      (sexp:list ((sexp:symbol 'quote _) (sexp:symbol x _)) _)
       -> (itype/var (cmap/add tvarmap x))
-      (sexp:symbol name)
+      (sexp:symbol name _)
       -> (itype:dyn name)
       exp
       -> (raise (:ParseTypeFailed exp))
       )
 
     (define P
-      (sexp:list ((sexp:symbol 'vec) size type))              -> (type:vec (new-itvar) (parse-size size) (P type))
-      (sexp:list ((sexp:symbol 'ref) type))                   -> (type:ref (P type))
-      (sexp:list ((sexp:symbol 'mut) type))                   -> (type:mut (P type))
-      (sexp:list ((sexp:symbol 'arrow) rtype (sexp:list ts))) -> (type:arrow (P rtype) (map P ts))
-      (sexp:list ((sexp:symbol '->) rtype (sexp:list ts)))    -> (type:arrow (P rtype) (map P ts))
-      (sexp:list ((sexp:symbol 'quote) (sexp:symbol x)))      -> (type/var (cmap/add tvarmap x))
-      (sexp:symbol 'i1)   -> i1
-      (sexp:symbol 'i8)   -> i8
-      (sexp:symbol 'i16)  -> i16
-      (sexp:symbol 'i31)  -> i31
-      (sexp:symbol 'i32)  -> i32
-      (sexp:symbol 'i64)  -> i64
-      (sexp:symbol 'i128) -> i128
-      (sexp:symbol 'i256) -> i256
-      (sexp:symbol 'none) -> none
+      (sexp:list ((sexp:symbol 'vec _) size type) _)              -> (type:vec (new-itvar) (parse-size size) (P type))
+      (sexp:list ((sexp:symbol 'ref _) type) _)                   -> (type:ref (P type))
+      (sexp:list ((sexp:symbol 'mut _) type) _)                   -> (type:mut (P type))
+      (sexp:list ((sexp:symbol 'arrow _) rtype (sexp:list ts _)) _) -> (type:arrow (P rtype) (map P ts))
+      (sexp:list ((sexp:symbol '-> _) rtype (sexp:list ts _)) _)    -> (type:arrow (P rtype) (map P ts))
+      (sexp:list ((sexp:symbol 'quote _) (sexp:symbol x _)) _)      -> (type/var (cmap/add tvarmap x))
+      (sexp:symbol 'i1 _)   -> i1
+      (sexp:symbol 'i8 _)   -> i8
+      (sexp:symbol 'i16 _)  -> i16
+      (sexp:symbol 'i31 _)  -> i31
+      (sexp:symbol 'i32 _)  -> i32
+      (sexp:symbol 'i64 _)  -> i64
+      (sexp:symbol 'i128 _) -> i128
+      (sexp:symbol 'i256 _) -> i256
+      (sexp:symbol 'none _) -> none
       x                   -> (raise (:ParseTypeFailed x))
       )
     (instantiate-type (P sexp))

@@ -43,20 +43,20 @@
     (let ((s (symbol->string sym))
 	  (slen (string-length s)))
       (match (string-ref s 0) (string-ref s (- slen 1)) with
-        #\< #\> -> (sexpat:exp (sexp:symbol (string->symbol (substring s 1 (- slen 1)))))
+        #\< #\> -> (sexpat:exp (sexp:symbol (string->symbol (substring s 1 (- slen 1))) null-src))
         _ _     -> (sexpat:var sym)
         )))
 
   (define C
-    (sexp:list ((sexp:symbol '%ann) a x)) -> (sexpat:ann a (C x))
-    (sexp:list xs)   -> (sexpat:list (C* '() xs))
-    (sexp:symbol s)  -> (bracket-check s)
+    (sexp:list ((sexp:symbol '%ann _) a x) _) -> (sexpat:ann a (C x))
+    (sexp:list xs _)   -> (sexpat:list (C* '() xs))
+    (sexp:symbol s _)  -> (bracket-check s)
     other            -> (sexpat:exp other)
     )
 
   (define dot3?
-    (sexp:list ((sexp:symbol '%ann) a (sexp:symbol '...))) -> #t
-    (sexp:symbol '...) -> #t
+    (sexp:list ((sexp:symbol '%ann _) a (sexp:symbol '... _)) _) -> #t
+    (sexp:symbol '... _) -> #t
     _ -> #f
     )
 
@@ -74,11 +74,11 @@
   ;; --- test a pattern against an input ---
 
   (define B
-    p (sexp:list ((sexp:symbol '%ann) _ e)) -> (B p e)
+    p (sexp:list ((sexp:symbol '%ann _) _ e) _) -> (B p e)
     (sexpat:exp a) b                        -> (sexp=? a b)
     (sexpat:var s) _                        -> #t
     (sexpat:ann a s) x                      -> (B s x)
-    (sexpat:list al) (sexp:list bl)         -> (B* al bl)
+    (sexpat:list al) (sexp:list bl _)         -> (B* al bl)
     (sexpat:list al) exp                    -> #f
     (sexpat:rep p) exp                      -> (impossible)
     )
@@ -100,8 +100,8 @@
   (define D
     (sexpat:var s) e                        -> (alist:entry s (:tuple 0 e) (alist:nil))
     (sexpat:ann a p) e                      -> (D p e)
-    p (sexp:list ((sexp:symbol '%ann) _ e)) -> (D p e) ;; skip annotations
-    (sexpat:list al) (sexp:list bl)         -> (D* al bl)
+    p (sexp:list ((sexp:symbol '%ann _) _ e) _) -> (D p e) ;; skip annotations
+    (sexpat:list al) (sexp:list bl _)         -> (D* al bl)
     (sexpat:exp a) b                        -> (alist:nil)
     a b                                     -> (raise (:Nope1 (sexpat-repr a) (repr b)))
     )
@@ -113,7 +113,7 @@
     ;;  e1 and no e2.  the call to `first` fails in combine-envs.
     ((sexpat:rep p) . ptl) exps -> (combine-envs (map (partial (D p _)) exps))
     (phd . ptl) (ehd . etl)     -> (env-union (D phd ehd) (D* ptl etl))
-    a b                         -> (raise (:Nope2 (sexpat-repr (sexpat:list a)) (repr (sexp:list b))))
+    a b                         -> (raise (:Nope2 (sexpat-repr (sexpat:list a)) (repr (sexp:list b null-src))))
     )
 
   ;; note: assumes no variable conflicts
@@ -144,7 +144,7 @@
                (alist/push result
                            k0
                            (:tuple (+ level0 1)
-                                   (sexp:list (reverse vals)))))))
+                                   (sexp:list (reverse vals) null-src))))))
       result))
 
   (define (print-env env)
@@ -161,7 +161,7 @@
   (define T
     env (sexpat:ann a p) -> (list (sexp (sym '%ann) a (first (T env p))))
     env (sexpat:var s)   -> (list (apply-env env s))
-    env (sexpat:list l)  -> (list (sexp:list (T* env l)))
+    env (sexpat:list l)  -> (list (sexp:list (T* env l) null-src))
     env (sexpat:exp e)   -> (list e)
     env (sexpat:rep p)   -> (Trep env p)
     )
@@ -173,7 +173,7 @@
 
   (define (apply-env env s)
     (match (alist/lookup env s) with
-      (maybe:no) -> (sexp:symbol s)
+      (maybe:no) -> (sexp:symbol s null-src)
       (maybe:yes (:tuple 0 val)) -> val
       (maybe:yes (:tuple n val)) -> (raise (:MBE/Fnord (repr (sexp (sym s) (int n) val))))
       ))
@@ -213,7 +213,7 @@
     (define (check-lengths env)
       (define plen
         (:tuple 0 _)             -> 0
-        (:tuple n (sexp:list l)) -> (length l)
+        (:tuple n (sexp:list l _)) -> (length l)
         _                        -> (impossible))
       (let ((lengths (filter >0 (map plen (alist->values env)))))
         (when (not (all? (lambda (x) (= (first lengths) x)) (rest lengths)))
@@ -235,11 +235,11 @@
       -> (decompose (alist:entry k (:tuple 0 val) acc0)
                     (alist:entry k (:tuple 0 val) acc1)
                     env)
-      acc0 acc1 (alist:entry k (:tuple lev (sexp:list ())) env)
+      acc0 acc1 (alist:entry k (:tuple lev (sexp:list () _)) env)
       -> (maybe:no)
-      acc0 acc1 (alist:entry k (:tuple lev (sexp:list (val . vals))) env)
+      acc0 acc1 (alist:entry k (:tuple lev (sexp:list (val . vals) _)) env)
       -> (decompose (alist:entry k (:tuple (- lev 1) val) acc0)
-                    (alist:entry k (:tuple lev (sexp:list vals)) acc1)
+                    (alist:entry k (:tuple lev (sexp:list vals null-src)) acc1)
                     env)
       _ _ env
       -> (raise (:MBE/UnequalLengths env))
@@ -282,10 +282,10 @@
     ;; assumes the 'defmacro' symbol has been removed.
     acc ()
     -> (reverse acc)
-    acc (ipat (sexp:list ((sexp:symbol '%ann) _ (sexp:symbol '->))) opat . rest)
+    acc (ipat (sexp:list ((sexp:symbol '%ann _) _ (sexp:symbol '-> _)) _) opat . rest)
     -> (parse (list:cons (:tuple (sexp->sexpat ipat) (sexp->sexpat opat)) acc) rest)
     acc exp
-    -> (raise (:MacroParseFail (repr (sexp:list exp))))
+    -> (raise (:MacroParseFail (repr (sexp:list exp null-src))))
     )
   (parse (list:nil) pairs)
   )

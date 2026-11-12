@@ -2,12 +2,12 @@
 
 ;; ----- gaz datatypes -----
 
-(typealias src {path=string line=int pos=int})
-(define null-src {path="null" line=-1 pos=-1})
+(typealias zsrc {path=string line=int pos=int})
+(define null-zsrc {path="null" line=-1 pos=-1})
 
 ;; zexp annotated with src location.
 (datatype azexp
-  (:t zexp src type)
+  (:t zexp zsrc type)
   )
 
 (define (azexp exp src)
@@ -26,7 +26,7 @@
 
 ;; name:type pair with src location.
 (datatype aztname
-  (:t symbol type src)
+  (:t symbol type zsrc)
   )
 
 (define aztname/name
@@ -69,7 +69,7 @@
   (:decl symbol type)                 ;; name type
   (:lit aztname zlit)                 ;; name value
   ;; XXX probably not needed.
-  (:mac symbol src                    ;; name src patterns
+  (:mac symbol zsrc                    ;; name src patterns
         (list (:tuple sexpat sexpat)
               ))
   )
@@ -120,9 +120,9 @@
   )
 
 (define zlit->sexp
-  (zlit:none)     -> (sexp:undef)
+  (zlit:none)     -> (sexp:undef null-src)
   (zlit:big n)    -> (sexp (sym '%int) (int 10) (string (big->dec n)))
-  (zlit:vec subs) -> (sexp:vector (map zlit->sexp (vector->list subs)))
+  (zlit:vec subs) -> (sexp:vector (map zlit->sexp (vector->list subs)) null-src)
   )
 
 (define zlit-zero?
@@ -132,10 +132,10 @@
 
 ;; this will get more complicated if we expand the `src` datatype.
 (define parse-%ann
-  (sexp:list ((sexp:symbol 'src) (sexp:string path) (sexp:int line) (sexp:int pos)))
+  (sexp:list ((sexp:symbol 'src _) (sexp:string path _) (sexp:int line _) (sexp:int pos _)) _)
   -> {path=path line=line pos=pos}
   _
-  -> null-src
+  -> null-zsrc
   )
 
 (define dump-ztop
@@ -153,7 +153,7 @@
        (dump-azexp 2 body))
   (ztop:decl name type)
   -> (begin
-       (indent-src null-src 0 type)
+       (indent-src null-zsrc 0 type)
        (printf "declare " (ansi cyan (sym name)) " " (repr (type->sexp type))))
   (ztop:lit (aztname:t name type src) val)
   -> (begin
@@ -225,24 +225,6 @@
                (join format-aztname " " args))
        (dump-azexp (+ d 1) K)
        (dump-azexp d L))
-  )
-
-;; these belong in lib/pair.scm
-
-(define (unzip pairs)
-  (define U
-    acc0 acc1 ()                    -> (:tuple (reverse acc0) (reverse acc1))
-    acc0 acc1 ((:tuple a b) . rest) -> (U (list:cons a acc0) (list:cons b acc1) rest)
-    )
-  (U (list:nil) (list:nil) pairs))
-
-(define (zip as bs)
-  (define Z
-    acc () ()             -> (reverse acc)
-    acc (a . as) (b . bs) -> (Z (list:cons (:tuple a b) acc) as bs)
-    acc _ _               -> (raise (:Zip/UnequalLengthLists))
-    )
-  (Z '() as bs)
   )
 
 ;;
@@ -318,9 +300,9 @@
          -> (zexp:varref n)
          ;; is this a ref type? if so, replace it with (%get x)
          (maybe:yes (type:ref t))
-         -> (zexp:prim '%get (sexp:undef) (list (azexp:t (zexp:varref n) src (new-tvar))))
+         -> (zexp:prim '%get (sexp:undef null-src) (list (azexp:t (zexp:varref n) src (new-tvar))))
          (maybe:yes (type:mut t))
-         -> (zexp:prim '%get (sexp:undef) (list (azexp:t (zexp:varref n) src (new-tvar))))
+         -> (zexp:prim '%get (sexp:undef null-src) (list (azexp:t (zexp:varref n) src (new-tvar))))
          _
          -> (zexp:varref n)
          )

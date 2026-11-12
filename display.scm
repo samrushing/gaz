@@ -8,11 +8,11 @@
 
     (define (build-arms arms)
       (define build-args
-        acc ((sexp:list type) . tl) -> (build-args (list:cons type acc) tl)
+        acc ((sexp:list type _) . tl) -> (build-args (list:cons type acc) tl)
         acc _                       -> (reverse acc)
         )
       (define B
-        acc ((sexp:list ((sexp:symbol name) (sexp:int tag) (sexp:list args))) . tl)
+        acc ((sexp:list ((sexp:symbol name _) (sexp:int tag _) (sexp:list args _)) _) . tl)
         -> (B (alist:entry tag (:tuple name (build-args '() args)) acc) tl)
         acc _
         -> acc
@@ -22,7 +22,7 @@
 
     (for-list dt dts
       (match dt with
-        (sexp:list ((sexp:symbol name) (sexp:list arms)))
+        (sexp:list ((sexp:symbol name _) (sexp:list arms _)) _)
         -> (alist/push table name (build-arms arms))
         _
         -> (impossible)

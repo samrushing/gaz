@@ -5,14 +5,14 @@
 
 ;; modifying to avoid using irken ints.
 
-(define (read2 path read-char annotate?)
+(define (gaz-read path read-char annotate?)
 
   (let ((char #\eof) ;; one-character buffer
 	(line 1)
 	(pos -1)
-        (spath (sexp:string path))
-        (%ann (sexp:symbol '%ann))
-        (src (sexp:symbol 'src))
+        (spath (sexp:string path null-src))
+        (%ann (sexp:symbol '%ann null-src))
+        (src (sexp:symbol 'src null-src))
         )
 
     (defmacro ERR
@@ -92,13 +92,13 @@
       ;; handle dots in a symbol
       ;; as a special case, allow all-dots symbols (like '...) through unscathed
       (if (= n (string-length s))
-	  (sexp:symbol (string->symbol s))
+	  (sexp:symbol (string->symbol s) null-src)
 	  (let loop ((parts (reverse (string-split s #\.))))
 	    ;; a.b.c => (get (get a b) c)
 	    (match parts with
 	      ;; c b a
-	      (base)        -> (sexp:symbol (string->symbol base))
-	      (attr . rest) -> (sexp:attr (loop rest) (string->symbol attr))
+	      (base)        -> (sexp:symbol (string->symbol base) null-src)
+	      (attr . rest) -> (sexp:attr (loop rest) (string->symbol attr) null-src)
 	      ()            -> (impossible)
 	      ))))
 
@@ -113,13 +113,13 @@
       (let ((ch (peek)))
 	(match ch with
 	  #\eof -> (ERR "unexpected end of file")
-	  #\(   -> (sexp:list (read-list))
+	  #\(   -> (sexp:list (read-list) null-src)
 	  #\{   -> (read-record)
 	  #\"   -> (read-string)
-	  #\'   -> (begin (next) (sexp (sexp:symbol 'quote) (read)))
-	  #\,   -> (begin (next) (sexp (sexp:symbol 'comma) (read)))
-          #\!   -> (begin (next) (sexp (sexp:symbol 'bang) (read)))
-	  #\:   -> (begin (next) (sexp:cons 'nil (read-symbol)))
+	  #\'   -> (begin (next) (sexp (sexp:symbol 'quote null-src) (read)))
+	  #\,   -> (begin (next) (sexp (sexp:symbol 'comma null-src) (read)))
+          #\!   -> (begin (next) (sexp (sexp:symbol 'bang null-src) (read)))
+	  #\:   -> (begin (next) (sexp:cons 'nil (read-symbol) null-src))
 	  #\#   -> (begin
 		     (next)
 		     (set! ch (peek))
@@ -127,13 +127,13 @@
 		       #\\ -> (begin
 				(next) ;; skip backslash
 				(match (read-atom) with
-				  (:atom atom _ 1 _)      -> (sexp:char (string-ref atom 0))
-				  (:atom "newline" _ _ _) -> (sexp:char #\newline)
-				  (:atom "space" _ _ _)   -> (sexp:char #\space)
-				  (:atom "return" _ _ _)  -> (sexp:char #\return)
-				  (:atom "tab" _ _ _)     -> (sexp:char #\tab)
-				  (:atom "eof" _ _ _)     -> (sexp:char #\eof)
-				  (:atom "nul" _ _ _)     -> (sexp:char #\nul)
+				  (:atom atom _ 1 _)      -> (sexp:char (string-ref atom 0) null-src)
+				  (:atom "newline" _ _ _) -> (sexp:char #\newline null-src)
+				  (:atom "space" _ _ _)   -> (sexp:char #\space null-src)
+				  (:atom "return" _ _ _)  -> (sexp:char #\return null-src)
+				  (:atom "tab" _ _ _)     -> (sexp:char #\tab null-src)
+				  (:atom "eof" _ _ _)     -> (sexp:char #\eof null-src)
+				  (:atom "nul" _ _ _)     -> (sexp:char #\nul null-src)
 				  (:atom name _ _ _)      -> (ERR "bad character constant: " name)
 				   ))
 		       ;; Bb
@@ -143,20 +143,20 @@
 		       #\o -> (begin (next) (read-integer-literal 8))
                        #\B -> (begin (next) (read-integer-literal 2))
                        #\b -> (begin (next) (read-integer-literal 2))
-		       #\T -> (begin (next) (sexp:bool #t))
-		       #\t -> (begin (next) (sexp:bool #t))
-		       #\F -> (begin (next) (sexp:bool #f))
-		       #\f -> (begin (next) (sexp:bool #f))
-		       #\U -> (begin (next) (sexp:undef))
-		       #\u -> (begin (next) (sexp:undef))
-		       #\( -> (sexp:vector (read-list))
+		       #\T -> (begin (next) (sexp:bool #t null-src))
+		       #\t -> (begin (next) (sexp:bool #t null-src))
+		       #\F -> (begin (next) (sexp:bool #f null-src))
+		       #\f -> (begin (next) (sexp:bool #f null-src))
+		       #\U -> (begin (next) (sexp:undef null-src))
+		       #\u -> (begin (next) (sexp:undef null-src))
+		       #\( -> (sexp:vector (read-list) null-src)
 		       x   -> (ERR "syntax error: " (char x))
 		       ))
 	  #\)   -> (ERR "unexpected close-paren")
 	  _     -> (match (read-atom) with
                      ;; XXX gaz: need to handle negative integers!
 		     (:atom chars #t n _) -> (sexp (sym '%int) (int 10) (string chars))
-		     (:atom chars #f _ 0) -> (sexp:symbol (string->symbol chars))
+		     (:atom chars #f _ 0) -> (sexp:symbol (string->symbol chars) null-src)
 		     (:atom chars #f _ n) -> (dotted-symbol chars n)
 		     )
 	  )
@@ -172,7 +172,7 @@
 	    ;; array-reference syntax
 	    #\[ -> (let ((index (read-array-index)))
 		     ;; primops take a parameter---------V
-		     (set! result (sexp (sexp:symbol '%array-ref) (sexp:bool #f) result index))
+		     (set! result (sexp (sexp:symbol '%array-ref null-src) (sexp:bool #f null-src) result index))
                      (skip-whitespace)
                      (loop (peek)))
 	    ;; infix colon syntax
@@ -184,15 +184,15 @@
                        ;;   you're probably not the Irken compiler.
                        ;;
                        ;; normal constructor syntax
-		       (sexp:symbol dt) (sexp:symbol alt) -> (sexp:cons dt alt)
+		       (sexp:symbol dt _) (sexp:symbol alt _) -> (sexp:cons dt alt null-src)
                        ;; object/method syntax (ob::add arg0 ...)
 		       ;; not forcing (sexp:symbol) on <ob> might allow 'builtin method calls'...
 		       ;;  ob (sexp:cons 'nil method) -> (sexp:attr (sexp:attr ob 'o) method)
-                       ob (sexp:cons 'nil method)
-                       -> (sexp (sexp:symbol '%%obref) ob (sexp:symbol method))
+                       ob (sexp:cons 'nil method _)
+                       -> (sexp (sexp:symbol '%%obref null-src) ob (sexp:symbol method null-src))
                        ;; XXX note: maybe change to an %ann-otation.
 		       ;; object : type syntax
-		       ob type -> (sexp (maybe-annotate (sexp:symbol '%typed))
+		       ob type -> (sexp (maybe-annotate (sexp:symbol '%typed null-src))
                                         (maybe-annotate ob)
                                         type)
 		       ;;ob type -> (sexp (sexp:symbol '%typed) ob type)
@@ -230,7 +230,7 @@
 	(match ch with
 	  #\" -> (begin
 		   (next) ;; throw away the close-quote
-		   (sexp:string (list->string (reverse result))))
+		   (sexp:string (list->string (reverse result)) null-src))
 	  #\\ -> (begin
 		   ;; ignore this backslash, read the next char
 		   (next)
@@ -265,10 +265,10 @@
 	(skip-whitespace)
 	(let ((p (peek)))
 	  (if (eq? p #\})
-	      (begin (next) (sexp:record (reverse result)))
+	      (begin (next) (sexp:record (reverse result) null-src))
 	      (let ((name (read-name)))
 		(cond ((eq? name '...)
-		       (loop (list:cons (field:t name (sexp:bool #f)) result)))
+		       (loop (list:cons (field:t name (sexp:bool #f null-src) null-src) result)))
 		      (else
 		       (skip-whitespace)
 		       (if (not (eq? (peek) #\=))
@@ -276,7 +276,7 @@
 			   (begin
 			     (next)
 			     (let ((val (read)))
-			       (loop (list:cons (field:t name val) result))))))))
+			       (loop (list:cons (field:t name val null-src) result))))))))
 	      ))))
 
     (define (read-name)
@@ -339,14 +339,14 @@
 
 (define (remove-annotations exp)
   (define RA
-    (sexp:list ((sexp:symbol '%ann) _ x)) -> (RA x)
-    (sexp:list forms)                     -> (sexp:list (map RA forms))
-    (sexp:vector vs)                      -> (sexp:vector (map RA vs))
-    (sexp:attr e s)                       -> (sexp:attr (RA e) s)
-    (sexp:record lf)                      -> (sexp:record (map RAf lf))
+    (sexp:list ((sexp:symbol '%ann _) _ x) _) -> (RA x)
+    (sexp:list forms _)                     -> (sexp:list (map RA forms) null-src)
+    (sexp:vector vs _)                      -> (sexp:vector (map RA vs) null-src)
+    (sexp:attr e s _)                       -> (sexp:attr (RA e) s null-src)
+    (sexp:record lf _)                      -> (sexp:record (map RAf lf) null-src)
     other                                 -> other
     )
-  (define RAf (field:t name e) -> (field:t name (RA e)))
+  (define RAf (field:t name e _) -> (field:t name (RA e) null-src))
   (RA exp)
   )
 
@@ -358,9 +358,9 @@
       (if (< size width)
 	  (printf (repr exp))
 	  (match exp with
-	    (sexp:list ())
+	    (sexp:list () _)
 	    -> (printf "()")
-	    (sexp:list (hd . tl))
+	    (sexp:list (hd . tl) _)
 	    -> (begin (printf "(")
 		      (recur d hd)
 		      (for-each

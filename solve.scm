@@ -229,7 +229,10 @@
          (match (alist/lookup prim-type-map name) with
            (maybe:yes fun)
            -> (let ((txs (map var->type xs)))
-                (fun env param tx txs)
+                ;; XXX empty env kludge: `env` here maps continuations to
+                ;;  (list type), but the prim sigs are shared with solve-zexp,
+                ;;  whose env maps names to types.  (unify ignores it so far.)
+                (fun (alist:nil) param tx txs)
                 (S env K))
            (maybe:no)
            -> (match (alist/lookup tenv name) with

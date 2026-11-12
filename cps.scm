@@ -174,7 +174,7 @@
             (if (or (maybe? (alist/lookup prim-type-map name))
                     (valid-funcall? name (length args)))
                 (lambda (vars)
-                  (cps:prim name (sexp:bool #f) x vars (K x)))
+                  (cps:prim name (sexp:bool #f null-src) x vars (K x)))
                 (lambda (vars)
                   (cps:letcont
                    k (list x) (K x)
@@ -250,7 +250,7 @@
   ;; this is probably the wrong place/way to do this?
   ;; XXX might not be needed anymore because of the ref-ref pass.
   (define (frob-ref s)
-    (zexp:prim '%get (sexp:undef) (list (azexp (zexp:varref s) null-src))))
+    (zexp:prim '%get (sexp:undef null-src) (list (azexp (zexp:varref s) null-zsrc))))
 
   ;; This is the rounded-bracket ((X)) conversion from CwCC
   (define cps-tail
@@ -295,7 +295,7 @@
                   (valid-funcall? name (length args)))
               (lambda (vars)
                 (let ((x (newvar)))
-                  (cps:prim name (sexp:bool #f) x vars (cps:appk k (list x)))))
+                  (cps:prim name (sexp:bool #f null-src) x vars (cps:appk k (list x)))))
               (lambda (vars) (cps:app name k vars))))
       (zexp:let (aztname:t name type _) init body)
       -> (let ((j (newcont))
