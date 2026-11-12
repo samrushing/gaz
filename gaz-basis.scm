@@ -245,7 +245,8 @@
 
 ;; note: type is a sexp param.
 (defmacro alloca
-  (alloca type) -> (%prim alloca type)
+  ;;(alloca type) -> (%prim alloca type)
+  (alloca) -> (%prim alloca #f)
   )
 
 (defmacro letcont
@@ -259,4 +260,9 @@
 (defmacro shuffle
   (shuffle v0 mask)    -> (%prim shufv #f v0 mask)
   (shuffle v0 v1 mask) -> (%prim shufv #f v0 v1 mask)
+  )
+
+;; for use in `-eval` mode only.
+(defmacro print
+  (print ob) -> (%prim print #f ob)
   )

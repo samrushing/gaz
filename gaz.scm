@@ -16,6 +16,9 @@
 (require "./llvm.scm")
 (require "./eval.scm")
 
+;; experimental dump facility
+(require "./display.scm")
+
 (define program-options
   (makeopt
    (flag 'eval)
@@ -93,6 +96,7 @@
           (ztop:mac _ _ _)
           -> #u ;; probably going away
           ))
+      (printn (build-datatype-table))
       (for-list fun (reverse funs)
         (match (alpha fun tenv) with
           (ztop:fun (aztname:t fname ftype fsrc) formals body)

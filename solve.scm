@@ -2,58 +2,44 @@
 
 ;; type solving/checking
 
-(define (type=? ta tb)
-  (magic=? ta tb))
-
-;; NOTE: these schemes don't capture the need for int/vec types.
-;;
-;; to think about: the solver might want to be more like irken's,
-;;  with a generic pred/tvar system.  could we extend it with an
-;;  'int' arm, like this: (ref (int 'a)) which could assign an integer
-;;  size to 'a??  Urgh, nope: then we could have (ref 3).  can this
-;;  be solved with types at all?  Or do we just punt and throw the
-;;  error during LLVM conversion?  Or make a second 'type-sanity' pass?
-;; OR am I just over-thinking all of this and using simple functions
-;;  to do the type solving will work fine?
-
 (define (ftype t)
   (type-repr (apply-subst t)))
 
 ;; assert that <t> is a vector type (as opposed to llvm array)
-(define (vector-check t)
+(define (vector-check env t)
   (match (apply-subst t) with
     (type:vec v? size base)
-    -> (unify t (type:vec (itype:fix 1) size base))
+    -> (unify env t (type:vec (itype:fix 1) size base))
     _
     -> #u
     ))
 
 ;; verify all args are arith and the same. returns that type.
 (define sig-prim-arith
-  param rtype args
+  env param rtype args
   -> (begin
        (printf "U arith (" (join ftype ", " args) ") -> " (ftype rtype) "\n")
-       (for-list arg args (unify rtype arg))
-       (vector-check rtype)))
+       (for-list arg args (unify env rtype arg))
+       (vector-check env rtype)))
 
 ;; verify all args are arith and the same.  returns i1.
 (define sig-prim-cmp
-  param rtype (targ0 targ1)
+  env param rtype (targ0 targ1)
   -> (begin
-       (unify rtype i1)
-       (unify targ0 targ1)
-       (vector-check rtype)
-       (vector-check targ0))
-  param rtype targs
+       (unify env rtype i1)
+       (unify env targ0 targ1)
+       (vector-check env rtype)
+       (vector-check env targ0))
+  env param rtype targs
   -> (raise (:TypeError (:Arity targs)))
   )
 
 (define sig-set!
-  param rtype ((type:mut t0) t1)
+  env param rtype ((type:mut t0) t1)
   -> (begin
-       (unify t0 t1)
-       (unify rtype none))
-  _ _ argtypes
+       (unify env t0 t1)
+       (unify env rtype none))
+  _ _ _ argtypes
   -> (begin
        (printf "NotRef? (" (join type-repr ", " argtypes) ")\n")
        (raise (:TypeError (:NotRef)))
@@ -61,14 +47,14 @@
   )
 
 (define sig-%get
-  param rtype ((type:ref t0))
-  -> (unify t0 rtype)
-  param rtype ((type:mut t0))
-  -> (unify t0 rtype)
+  env param rtype ((type:ref t0))
+  -> (unify env t0 rtype)
+  env param rtype ((type:mut t0))
+  -> (unify env t0 rtype)
   ;; hack for non-ref vector %get.
   ;; param rtype (t0)
-  ;; -> (unify rtype t0)
-  _ _ _
+  ;; -> (unify env rtype t0)
+  _ _ _ _
   -> (begin
        (printf "notref?\n")
        (raise (:TypeError (:NotRef)))
@@ -76,25 +62,22 @@
   )
 
 (define sig-vref
-  param rtype ((type:ref (type:vec v? size t0)) tindex)
+  env param rtype ((type:ref (type:vec v? size t0)) tindex)
   -> (begin
-       ;; we want to express that tindex is an integer type, but
-       ;;  there's no way to do that now.  The i0 hack does not work.
-       ;;(unify tindex (type:int 0))
-       (unify tindex (type:int (new-itvar)))
-       (unify (type:ref t0) rtype)
+       (unify env tindex (type:int (new-itvar)))
+       (unify env (type:ref t0) rtype)
        )
-  param rtype ((type:mut (type:vec v? size t0)) tindex)
+  env param rtype ((type:mut (type:vec v? size t0)) tindex)
   -> (begin
-       (unify tindex (type:int (new-itvar)))
-       (unify (type:mut t0) rtype)
+       (unify env tindex (type:int (new-itvar)))
+       (unify env (type:mut t0) rtype)
        )
-  param rtype ((type:vec v? size t0) tindex)
+  env param rtype ((type:vec v? size t0) tindex)
   -> (begin
-       (unify tindex (type:int (new-itvar)))
-       (unify rtype t0)
+       (unify env tindex (type:int (new-itvar)))
+       (unify env rtype t0)
        )
-  param a b
+  env param a b
   -> (begin
        (printf "param = " (repr param) "\n")
        (printf "args = " (join (lambda (x) (repr (type->sexp x))) ", " b)  "\n")
@@ -105,14 +88,14 @@
 ;; this could be replaced with a `sig-conversion` that covered all the LLVM conversion
 ;;  operators including ptrtoint/inttoptr/fp/etc.
 (define (sig-change-size bigger?)
-  (lambda (param rtype args)
+  (lambda (env param rtype args)
     (match args with
       ((type:int (itype:fix isize)))
       -> (let ((ptype (parse-type param)))
            (match ptype with
              (type:int (itype:fix osize))
              -> (if ((if bigger? > <) osize isize)
-                    (unify rtype ptype)
+                    (unify env rtype ptype)
                     (raise (:TypeError (:Zext isize osize))))
              _
              -> (begin
@@ -126,18 +109,15 @@
       -> (raise (:TypeError (:Arity args)))
       )))
 
+;; XXX removing type param.
 ;; (prim alloca i64) => i64*
 
 (define sig-alloca
-  param rtype ()
-  -> (let ((ptype (parse-type param)))
-       (unify rtype (type:mut ptype)))
-  ;; XXX probably not
-  param rtype (n)
-  -> (let ((ptype (parse-type param)))
-       (unify rtype (type:mut ptype))
-       (unify n i32))
-  param rtype argtypes
+  env param rtype ()
+  -> #u
+  ;; -> (let ((ptype (parse-type param)))
+  ;;      (unify env rtype (type:mut ptype)))
+  env param rtype argtypes
   -> (raise (:TypeError (:Arity argtypes)))
   )
 
@@ -145,23 +125,30 @@
 ;; m is a vector of i32
 ;; rtype is a vector |m| with type of v0/v1 elems.
 (define sig-shufv
-  param rtype (v0 v1 m)
+  env param rtype (v0 v1 m)
   -> (let ((item-type (new-tvar))
            (mask-size (new-itvar)))
-       (unify v0 (type:vec btype-true (new-itvar) item-type))
-       (unify v0 v1)
-       (unify m (type:vec btype-true mask-size i32))
-       (unify rtype (type:vec btype-true mask-size item-type))
+       (unify env v0 (type:vec btype-true (new-itvar) item-type))
+       (unify env v0 v1)
+       (unify env m (type:vec btype-true mask-size i32))
+       (unify env rtype (type:vec btype-true mask-size item-type))
        )
-  param rtype (v0 m)
+  env param rtype (v0 m)
   -> (let ((item-type (new-tvar))
            (mask-size (new-itvar)))
-       (unify v0 (type:vec btype-true (new-itvar) item-type))
-       (unify m (type:vec btype-true mask-size i32))
-       (unify rtype (type:vec btype-true mask-size item-type))
+       (unify env v0 (type:vec btype-true (new-itvar) item-type))
+       (unify env m (type:vec btype-true mask-size i32))
+       (unify env rtype (type:vec btype-true mask-size item-type))
        )
-  _ _ _
+  _ _ _ _
   -> (raise (:TypeError (:BadArgs "shuffle")))
+  )
+
+(define sig-print
+  env param rtype (arg)
+  -> (unify env rtype none)
+  _ _ _ _
+  -> (raise (:TypeError (:BadArgs "print")))
   )
 
 (define prim-type-map
@@ -192,6 +179,7 @@
    ('trunc (sig-change-size #f))
    ('alloca sig-alloca)
    ('shufv sig-shufv)
+   ('print sig-print)
    ))
 
 ;; solve types for a CPS exp
@@ -203,7 +191,7 @@
     (match (alist/lookup env k0) (alist/lookup env k1) with
       (maybe:yes txs) (maybe:yes tys)
       -> (for-list2 tx ty txs tys
-           (unify tx ty))
+           (unify env tx ty))
       _ _
       -> (raise (:TypeError (:UnknownContinuations k0 k1)))
       ))
@@ -218,18 +206,18 @@
 
   ;; identical to the one in solve-zexp.
   (define Slit
-    ty (zlit:none)
-    -> (unify ty (type:none))
-    ty (zlit:big n)
-    -> (unify ty (type:int (new-itvar)))
-    ty (zlit:vec lits)
+    env ty (zlit:none)
+    -> (unify env ty (type:none))
+    env ty (zlit:big n)
+    -> (unify env ty (type:int (new-itvar)))
+    env ty (zlit:vec lits)
     -> (let ((tv (new-tvar))
              (tsz (itype:fix (vector-length lits))))
          (printf "Slit vec ty=" (type-repr ty) " tsz=" (repr (itype->sexp tsz)) "\n")
-         (unify ty (type:vec (new-itvar) tsz tv)) ;; XXX bvar
+         (unify env ty (type:vec (new-itvar) tsz tv)) ;; XXX bvar
          (for-vector lit lits
            (printf "each lit\n")
-           (Slit tv lit))))
+           (Slit env tv lit))))
 
   (define (S env exp)
     (printf "S:\n")
@@ -241,15 +229,15 @@
          (match (alist/lookup prim-type-map name) with
            (maybe:yes fun)
            -> (let ((txs (map var->type xs)))
-                (fun param tx txs)
+                (fun env param tx txs)
                 (S env K))
            (maybe:no)
            -> (match (alist/lookup tenv name) with
                 (maybe:yes (type:arrow rtype argtypes))
                 -> (let ((txs (map var->type xs)))
-                     (for-list2 a b txs argtypes
-                       (unify a b))
-                     (unify rtype tx)
+                     (for-list2 a b txs (map undyn-type argtypes)
+                       (unify env a b))
+                     (unify env rtype tx)
                      (S env K))
                 _
                 -> (raise (:TypeError (:UnknownPrim name)))
@@ -257,7 +245,7 @@
       (cps:letval (var:t x tx) val K)
       -> (begin
            (printf "Slit " (type-repr tx) " ==? " (zlit-repr val) "\n")
-           (Slit tx val)
+           (Slit env tx val)
            (S env K))
       (cps:letcont (cvar:t k) xs K0 K1)
       -> (let ((env0 (alist:entry k (map var->type xs) env)))
@@ -269,14 +257,14 @@
            (maybe:yes txs)
            -> (for-list2 ta tb txs (map var->type xs)
                 ;; (printf "appk arg " (type-repr ta) " = " (type-repr tb) "\n")
-                (unify ta tb))
+                (unify env ta tb))
            (maybe:no)
            -> (raise (:TypeError (:UnknownContinuation k))))
       (cps:app name k vars)
       -> (raise (:NotYetImplemented "internal funcall"))
       (cps:if (var:t t tt) (cvar:t c) (cvar:t a))
       -> (begin
-           (unify tt i1)
+           (unify env tt i1)
            (UK env c a))
       (cps:dead k)
       -> (S env k)
@@ -326,7 +314,8 @@
     (cps:prim '%vref _ _ (src (var:t i ti)) K)
     -> (match (apply-subst ti) with
          (type:int (itype:var _))
-         -> (begin (unify ti index-type) (W K))
+         ;; XXX empty env kludge
+         -> (begin (unify (alist:nil) ti index-type) (W K))
          _
          -> (W K)
          )
@@ -341,10 +330,46 @@
 
   )
 
+;; --- itype:dyn vector arguments ---
+;;
+;; the type signature makes a statement about the size of an argument vector being equal to
+;;   another argument's _value_.  How can we verify this at the call site?  For example,
+;;   what if two length arguments have their names swapped?  At the point of call, we don't
+;;   know what name it was probably pulled from as a varref.  However, we _do_ know that
+;;   since everything has typed up to this point, that the vectors are properly typed at
+;;   this time.  I think handling this 'swap of len args' error is our 'proof of
+;;   principle': if we can do it, then this idea is valid.  If not, then no.
+;;
+;; for example, does our idea allow the computation of such a length?  e.g., what if we
+;;   want to pass in `a` that is twice the size of `b`?  I think the only way to do that
+;;   within our type system is to have the 'twice the size' value be in a variable, and the
+;;   type of the larger vec must be built on that variable.
+
+;; my current thinking: we can verify the proper arguments in a zexp pass.
+;;   in the meanwhile to get this to type we need to replace itype:dyn with itype:var.
+
+;; if a funcall is made that passes a itype:dyn vector, replace
+;; the itype:dyn with an itype:var.
+(define (undyn-type t)
+  (define I
+    (itype:dyn n) -> (new-itvar)
+    t             -> t
+    )
+  (define T
+    (type:vec v? size base) -> (type:vec (I v?) (I size) (T base))
+    (type:mut t)            -> (type:mut (T t))
+    (type:ref t)            -> (type:ref (T t))
+    (type:arrow rt ts)      -> (type:arrow (T rt) (map T ts))
+    t                       -> t
+    )
+  (T t)
+  )
 
 ;; solve types for zexp
 
 (define (solve-zexp tenv exp)
+
+  (define zexp->kind (ob->dtarm 'zexp))
 
   (define (extend-with-cont env kname binds)
     (define R
@@ -370,16 +395,16 @@
     (R env '() formals))
 
   (define Slit
-    ty (zlit:none)
-    -> (unify ty (type:none))
-    ty (zlit:big n)
-    -> (unify ty (type:int (new-itvar)))
-    ty (zlit:vec lits)
+    env ty (zlit:none)
+    -> (unify env ty (type:none))
+    env ty (zlit:big n)
+    -> (unify env ty (type:int (new-itvar)))
+    env ty (zlit:vec lits)
     -> (let ((tv (new-tvar))
              (tsz (itype:fix (vector-length lits))))
-         (unify ty (type:vec (new-itvar) tsz tv))
+         (unify env ty (type:vec (new-itvar) tsz tv))
          (for-vector lit lits
-           (Slit tv lit))))
+           (Slit env tv lit))))
 
   (define (type-repr* t)
     (type-repr (apply-subst t)))
@@ -388,8 +413,8 @@
     (apply-subst (azexp/type exp)))
 
   (define (Sprim env ty name param xs)
-    ;; (printf "Sprim " (sym name) " " (repr param) " " (type-repr* ty)
-    ;;         " (" (join type-repr* " " (map exp->type xs)) ")\n")
+    (printf "Sprim " (sym name) " " (repr param) " " (type-repr* ty)
+            " (" (join type-repr* " " (map exp->type xs)) ")\n")
     (match (alist/lookup prim-type-map name) with
       (maybe:yes fun)
       -> (begin
@@ -398,43 +423,41 @@
              (S env (exp->type x) x))
            ;; (printf "calling sig fun...\n")
            ;; (printf "  " (type-repr* ty) " = (" (join type-repr* " " (map exp->type xs)) ")\n")
-           (fun param ty (map exp->type xs)))
+           (fun env param ty (map exp->type xs)))
       (maybe:no)
       -> (match (alist/lookup env name) with
-           (maybe:yes (type:arrow rtype argtypes))
-           -> (let ((txs (map exp->type xs)))
-                (for-list2 a b txs argtypes
-                  (unify a b))
-                (unify rtype ty))
+           (maybe:yes funtype)
+           -> (Scall env ty funtype xs)
            _
            -> (raise (:TypeError (:UnknownPrim name)))
            )))
 
+  (define (Scall env ty funtype args)
+    (match funtype with
+      (type:arrow rtype argtypes)
+      -> (begin
+           ;; XXX we need to 'instantiate' ftype's formals-vs-args
+           (printf "Scall targ " (ftype rtype) " args " (join ftype ", " argtypes) "\n")
+           (for-list2 arg targ args (map undyn-type argtypes)
+             (printf "  arg " (ftype targ) "\n")
+             (S env targ arg))
+           (unify env ty rtype))
+      _
+      -> (raise (:TypeError (:FunCall (type-repr funtype))))
+      ))
+
   (define S
     env ty0 (azexp:t exp src ty1)
     -> (begin
-         (unify ty0 ty1)
-         ;; (printf "S* " (sym (zname exp)) "\n")
+         (printf "S " (sym (zexp->kind exp)) "\n")
+         (unify env ty0 ty1)
          (S* env ty0 exp))
-    )
-
-  (define zname
-    (zexp:lit _)           -> 'lit
-    (zexp:prim _ _ _)      -> 'prim
-    (zexp:seq _)           -> 'seq
-    (zexp:let _ _ _)       -> 'let
-    (zexp:varref _)        -> 'varref
-    (zexp:if _ _ _)        -> 'if
-    (zexp:call _ _)        -> 'call
-    (zexp:loop _ _ _)      -> 'loop
-    (zexp:letcont _ _ _ _) -> 'letcont
-    (zexp:appk _ _)        -> 'appk
     )
 
   (define S*
 
     env ty (zexp:lit lit)
-    -> (Slit ty lit)
+    -> (Slit env ty lit)
 
     env ty (zexp:prim name param args)
     -> (Sprim env ty name param args)
@@ -454,7 +477,7 @@
 
     env ty (zexp:varref name)
     -> (match (alist/lookup env name) with
-         (maybe:yes ty1) -> (unify ty ty1)
+         (maybe:yes ty1) -> (unify env ty ty1)
          (maybe:no)      -> (begin
                               (printf "varref of " (sym name) "\n")
                               (impossible)
@@ -469,11 +492,8 @@
 
     env ty (zexp:call name args)
     -> (match (alist/lookup env name) with
-         (maybe:yes (type:arrow rtype argtypes))
-         -> (begin
-              (for-list2 arg targ args argtypes
-                (S env targ arg))
-              (unify ty rtype))
+         (maybe:yes ftype)
+         -> (Scall env ty ftype args)
          _
          -> (raise (:TypeError (:BadCall name))))
 

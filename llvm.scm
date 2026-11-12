@@ -60,9 +60,9 @@
         ("scm" . rest)
         -> (string-join (reverse (list:cons "ll" rest)) ".")
         (ext . rest)
-        -> (raise (:UnexpectedExtension ext))
+        -> (raise (:LLVM "unexpected extension" ext))
         ()
-        -> (raise (:EmptyPath?))
+        -> (raise (:LLVM "empty path?" path))
         )))
 
   (let ((opath (make-opath path))
@@ -71,32 +71,6 @@
         (decls (cmap/make string-cmp))
         (names (tree/empty))
         (local '()))
-
-    ;; format a type for llvm.
-    (define (ftype t)
-      (match (apply-subst t) with
-         (type:vec (itype:fix 1) (itype:fix s) t) -> (format "<" (int s) " x " (ftype t) ">")
-         (type:vec _             (itype:fix s) t) -> (format "[" (int s) " x " (ftype t) "]")
-         (type:int (itype:fix w)) -> (format "i" (int w))
-         (type:ref t)             -> (format (ftype t) "*")
-         (type:mut t)             -> (format (ftype t) "*")
-         (type:none)              -> "void"
-         _                        -> (raise (:BadLLVMType (repr (type->sexp t))))
-        ))
-
-    ;; for valref[t] (i.e., 'immediate' literals).
-    ;; compare format-lit below.
-    (define flit
-      ftype? (type:vec _ size type) (zlit:vec subs)
-      -> (format "<" (join (lambda (x) (flit #t type x)) ", " (vector->list subs)) ">")
-      ftype? ty (zlit:big n)
-      -> (format (if ftype? (format (ftype ty) " ") "") (big->dec n))
-      ftype? ty (zlit:none)
-      -> (raise (:LLVM/NoneLit))
-      _ _ _
-      -> (imp)
-      )
-
 
     (define (safe name)
       (match (tree/member names symbol-index-cmp name) with
@@ -111,6 +85,32 @@
 
       (let ((phimap (alist:nil))
             (venv (alist:nil)))
+
+        ;; format a type for llvm.
+        (define (ftype t)
+          (match (apply-subst t) with
+            (type:vec (itype:fix 1) (itype:fix s) t) -> (format "<" (int s) " x " (ftype t) ">")
+            (type:vec _             (itype:fix s) t) -> (format "[" (int s) " x " (ftype t) "]")
+            (type:vec _             (itype:dyn n) t) -> (format "[" (valref (var:t n none)) " x " (ftype t) "]")
+            (type:int (itype:fix w)) -> (format "i" (int w))
+            (type:ref t)             -> (format (ftype t) "*")
+            (type:mut t)             -> (format (ftype t) "*")
+            (type:none)              -> "void"
+            _                        -> (raise (:LLVM "Bad LLVM Type" (type-repr t)))
+            ))
+
+        ;; for valref[t] (i.e., 'immediate' literals).
+        ;; compare format-lit below.
+        (define flit
+          ftype? (type:vec _ size type) (zlit:vec subs)
+          -> (format "<" (join (lambda (x) (flit #t type x)) ", " (vector->list subs)) ">")
+          ftype? ty (zlit:big n)
+          -> (format (if ftype? (format (ftype ty) " ") "") (big->dec n))
+          ftype? ty (zlit:none)
+          -> (raise (:LLVM "literal of type `none`" (type-repr ty)))
+          _ _ _
+          -> (imp)
+          )
 
         (define gensym
           (let ((counter 0))
@@ -195,7 +195,7 @@
             (cps:prim name p x vars K)
             -> (begin (emit-prim name p x vars) (emit K blockname))
             (cps:app name k vars)
-            -> (raise (:LLVM/NotImplementedYet))
+            -> (raise (:LLVM "Not Implemented Yet" "cps:app"))
             )
           )
 
@@ -206,7 +206,7 @@
             (cvar:t 'halt) (one)
             -> (oprintf "  ret " (valreft one) "\n")
             (cvar:t 'halt) _
-            -> (raise (:LLVM/MultipleReturnValues))
+            -> (raise (:LLVM "Multiple Return Values" "branch"))
             (cvar:t k) _
             -> (oprintf "  br label %" (safe k) "\n")
             ))
@@ -242,6 +242,8 @@
            ('trunc  prim-trunc)
            ('alloca prim-alloca)
            ('shufv  prim-shufv)
+           ;; no-op - used in `-eval` mode only.
+           ('print  prim-print)
            ))
 
         (define (prim-binop op)
@@ -263,7 +265,7 @@
         (define ref/mut->type
           (type:ref t) -> t
           (type:mut t) -> t
-          _ -> (impossible)
+          _ -> (imp)
           )
 
         ;; getelementptr interprets index values as _signed_, which definitely
@@ -327,7 +329,7 @@
           (match t with
             (type:int _) -> (ftype t)
             (type:vec _ (itype:fix size) t) -> (format "v" (int size) (type-as-suffix t))
-            _ -> (raise (:LLVM/BadTypeForSuffix (type-repr t)))
+            _ -> (raise (:LLVM "Bad Type For Suffix" (type-repr t)))
             ))
 
         (define (add-rotate-decl t right?)
@@ -355,6 +357,11 @@
             -> (imp)
             ))
 
+        ;; no-op, used in `-eval` mode only.
+        (define (prim-print param r tr args)
+          #u
+          )
+
         (define var->type
           (var:t _ type) -> (apply-subst type)
           )
@@ -370,7 +377,7 @@
             ((var:t a ta) . tl)
             -> (format (ftype ta) " " (join valref ", " args))
             ()
-            -> (raise (:LLVM/EmptyArgs))
+            -> (raise (:LLVM "Empty Args" ""))
             ))
 
         (define emit-prim
@@ -385,9 +392,9 @@
                                 "call " (ftype rtype) " @" (safe name)
                                 " (" (join valreft ", " args) ")\n")
                     (maybe:yes ftype)
-                    -> (raise (:LLVM/BadCallType (format (repr (type->sexp ftype)))))
+                    -> (raise (:LLVM "BadCallType" (type-repr ftype)))
                     (maybe:no)
-                    -> (raise (:LLVM/NoSuchPrim (format (sym name))))
+                    -> (raise (:LLVM "NoSuchPrim" (format (sym name))))
                     )
                )
           )
@@ -415,9 +422,9 @@
         -> (if (= size (vector-length subs))
                (format "[" (int size) " x " (ftype ty0) "] ["
                        (join (partial (format-lit ty0 _)) ", " (vector->list subs)) "]")
-               (raise (:BadLit lit)))
+               (raise (:LLVM "Bad Vector Lit" (zlit-repr lit))))
         ty vec
-        -> (raise (:BadLit lit))
+        -> (raise (:LLVM "Bad Lit" (zlit-repr lit)))
         ))
 
     ;; collect names of defined functions
@@ -447,7 +454,7 @@
         (:tuple name (type:mut type) val)
         -> (oprintf "@" (safe name) " = global " (format-lit type val) "\n")
         (:tuple name type other)
-        -> (raise (:NotYetImplemented "non-ref top-level literals"))
+        -> (raise (:LLVM "not yet implemented" "non-ref top-level literals"))
         ))
     ;; emit functions
     (for-list fun funs

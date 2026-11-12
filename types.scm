@@ -25,6 +25,7 @@
 (datatype itype
   (:fix int)
   (:var (tvar itype))
+  (:dyn symbol)
   )
 
 ;; note: vector? is a 'boolean itype'.  in other words, it's an
@@ -51,6 +52,7 @@
   (itype:fix 0) -> "#F"
   (itype:fix _) -> "#T"
   (itype:var _) -> "?"
+  (itype:dyn _) -> "!" ;; malformed
   )
 
 (define btype-true  (itype:fix 1))
@@ -60,8 +62,10 @@
   (type:none)                              -> "none"
   (type:int (itype:fix n))                 -> (format "i" (int n))
   (type:int (itype:var (tvar:t n _)))      -> (format "(int '" (int n) ")")
+  (type:int (itype:dyn name))              -> (format "(int " (ansi red (sym name)) ")") ;; malformed
   (type:vec v? (itype:fix n) t)            -> (format "(vec " (btype-repr v?) " " (int n) " " (type-repr t) ")")
   (type:vec v? (itype:var (tvar:t n _)) t) -> (format "(vec " (btype-repr v?) " '" (int n) " " (type-repr t) ")")
+  (type:vec v? (itype:dyn name) t)         -> (format "(vec " (btype-repr v?) " " (ansi yellow (sym name)) " " (type-repr t) ")")
   (type:arrow rt txs)                      -> (format "(" (join type-repr " " txs) " -> " (type-repr rt) ")")
   (type:ref t)                             -> (format "(ref " (type-repr t) ")")
   (type:mut t)                             -> (format "(mut " (type-repr t) ")")
@@ -104,13 +108,15 @@
   )
 
 (define itype->sexp
-  (itype:fix n)  -> (sexp:symbol (string->symbol (format "i" (int n))))
-  (itype:var tv) -> (tvar->sexp tv)
+  (itype:fix n)    -> (sexp:symbol (string->symbol (format "i" (int n))))
+  (itype:var tv)   -> (tvar->sexp tv)
+  (itype:dyn name) -> (sexp:symbol name)
   )
 
 (define size->sexp
-  (itype:fix n)  -> (sexp:int n)
-  (itype:var tv) -> (tvar->sexp tv)
+  (itype:fix n)    -> (sexp:int n)
+  (itype:var tv)   -> (tvar->sexp tv)
+  (itype:dyn name) -> (sexp:symbol name)
   )
 
 (define type->sexp
@@ -124,9 +130,6 @@
   (type:none)       -> (sexp:symbol 'none)
   )
 
-;; (define (type-repr t)
-;;   (repr (type->sexp t)))
-
 (define (parse-type sexp)
 
   (let ((tvarmap (cmap/make symbol-index-cmp)))
@@ -138,6 +141,8 @@
       -> (itype:fix (string->int digits))
       (sexp:list ((sexp:symbol 'quote) (sexp:symbol x)))
       -> (itype/var (cmap/add tvarmap x))
+      (sexp:symbol name)
+      -> (itype:dyn name)
       exp
       -> (raise (:ParseTypeFailed exp))
       )
@@ -174,6 +179,7 @@
     (define (Wi itype)
       (match itype with
         (itype:fix n) -> itype
+        (itype:dyn name) -> itype
         (itype:var (tvar:t i r))
         -> (match (tree/member itvm int-cmp i) with
              (maybe:yes itv) -> itv
@@ -231,28 +237,28 @@
   (R t)
   )
 
-;; link through type variable
-(define (type-union isvar? a b)
-  (match (isvar? a) (isvar? b) with
-    (maybe:yes (tvar:t na ra)) (maybe:yes (tvar:t nb rb))
-    -> (if (< na nb) ;; gravitate toward smaller index
-           (set! rb.parent (maybe:yes a))
-           (set! ra.parent (maybe:yes b)))
-    (maybe:yes (tvar:t na ra)) (maybe:no)
-    -> (set! ra.parent (maybe:yes b))
-    (maybe:no) (maybe:yes (tvar:t nb rb))
-    -> (set! rb.parent (maybe:yes a))
-    (maybe:no) (maybe:no)
-    -> #u
-    ))
-
-(define (unify t0 t1)
+(define (unify env t0 t1)
 
   (define (type-error t0 t1)
     (let ((t0s (type->sexp (apply-subst t0)))
           (t1s (type->sexp (apply-subst t1))))
       (printf "U " (sexp t0s) " != " (sexp t1s) "\n")
       (raise (:TypeError (:Unify t0s t1s)))
+      ))
+
+  ;; link through type variable
+  (define (type-union isvar? a b)
+    (match (isvar? a) (isvar? b) with
+      (maybe:yes (tvar:t na ra)) (maybe:yes (tvar:t nb rb))
+      -> (if (< na nb) ;; gravitate toward smaller index
+             (set! rb.parent (maybe:yes a))
+             (set! ra.parent (maybe:yes b)))
+      (maybe:yes (tvar:t na ra)) (maybe:no)
+      -> (set! ra.parent (maybe:yes b))
+      (maybe:no) (maybe:yes (tvar:t nb rb))
+      -> (set! rb.parent (maybe:yes a))
+      (maybe:no) (maybe:no)
+      -> #u
       ))
 
   (define (U-itype it0 it1)
@@ -262,6 +268,7 @@
       (when (not (eq? u v))
         (match u v with
           (itype:fix na) (itype:fix nb) -> (if (= na nb) #u (type-error t0 t1))
+          (itype:dyn na) (itype:dyn nb) -> (if (eq? na nb) #u (type-error t0 t1))
           (itype:var _) _ -> (type-union itype-isvar? u v)
           _ (itype:var _) -> (type-union itype-isvar? u v)
           _ _             -> (type-error t0 t1)
@@ -296,6 +303,9 @@
   (U t0 t1)
   )
 
+;; this has the unfortunate effect of copying all type objects,
+;;  with no sharing at all.  It might be nice to make a smarter
+;;  system that shares type objects when possible.
 (define (apply-subst t)
 
   (define (pi t)

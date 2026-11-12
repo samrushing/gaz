@@ -86,7 +86,7 @@
 (define big-trunc!
   (big:zero)   bits -> #u
   (big:pos vn) bits -> (digits-trunc! vn bits)
-  (big:neg vn) bits -> (raise (:NotImplementedError))
+  (big:neg vn) bits -> (raise (:Eval "not implemented" "negative bignums"))
   )
 
 (define (two**n n)
@@ -121,14 +121,14 @@
       env (name . names) (val . vals)
       -> (extend* (extend env (var/name name) val) names vals)
       env names vals
-      -> (raise (:Eval/ContinuationArity names))
+      -> (raise (:Eval "Continuation Arity" (format (int (length names)) " != " (int (length vals)))))
       )
 
     (define lookup
       env (var:t x tx)
       -> (match (alist/lookup env x) with
            (maybe:yes v) -> v
-           (maybe:no)    -> (raise (:Eval/UnknownVar x))
+           (maybe:no)    -> (raise (:Eval "UnknownVar" (format (sym x))))
            ))
 
     (define (lookup* env args)
@@ -152,14 +152,14 @@
          )))
 
     (define (prim-icmp cmp-val inv?)
-      (lambda (type args)
+      (lambda (env type args)
         (match type args with
           (type:int _) ((:tuple ta (zval:big a)) (:tuple tb (zval:big b)))
           -> (prim-int-icmp cmp-val inv? a b)
           (type:vec v? size ty) ((:tuple ta (zval:vec va)) (:tuple tb (zval:vec vb)))
           -> (prim-vec-icmp cmp-val inv? va vb)
           _ args
-          -> (raise (:Eval/BadArgs args))
+          -> (raise (:Eval "Bad icmp Args" (cmp-repr cmp-val)))
           )))
 
     (define (prim-vec-icmp cmp-val inv? a b)
@@ -189,7 +189,7 @@
           '>>  -> (big-rshift a (big->int b))
           '<<< -> (big-rotl a (big->int b) bits)
           '>>> -> (big-rotr a (big->int b) bits)
-          _    -> (raise (:Eval/UnknownIntBinPrimop op))
+          _    -> (raise (:Eval "UnknownIntBinPrimop" (format (sym op))))
           ))))
 
     (define (prim-vec-binop op bits a b)
@@ -206,13 +206,13 @@
         ))
 
     (define (prim-binop op)
-      (lambda (rtype args)
+      (lambda (env rtype args)
         (match rtype args with
           (type:int (itype:fix bits)) ((:tuple ta (zval:big a)) (:tuple tb (zval:big b)))
           -> (prim-int-binop op bits a b)
           (type:vec v? size (type:int (itype:fix bits))) ((:tuple ta (zval:vec a)) (:tuple tb (zval:vec b)))
           -> (prim-vec-binop op bits a b)
-          _ _ -> (raise (:Eval/Arity args))
+          _ _ -> (raise (:Eval "Binop Arity" (format (sym op))))
           )))
 
     (define (prim-int-logop op bits a b)
@@ -226,17 +226,17 @@
                  (set! dc[i] (logand big/mask (op da[i] db[i]))))
                (zval:big (twos-canon bits c0)))
           _ _ _
-          -> (raise (:Eval/BadBignumOperands))
+          -> (raise (:Eval "Bad Bignum Operands" "logop"))
           )))
 
     (define (prim-logop op)
-      (lambda (rtype args)
+      (lambda (env rtype args)
         (match rtype args with
           (type:int (itype:fix bits)) ((:tuple ta (zval:big a)) (:tuple tb (zval:big b)))
           -> (prim-int-logop op bits a b)
           (type:vec v? size (type:int (itype:fix bits))) ((:tuple ta (zval:vec a)) (:tuple tb (zval:vec b)))
           -> (prim-vec-logop op bits a b)
-          _ _ -> (raise (:Eval/Arity args))
+          _ _ -> (raise (:Eval "Bad Logop Arity" ""))
           )))
 
     (define (prim-vec-logop op bits a b)
@@ -258,7 +258,7 @@
       )
 
     (define prim-shufv
-      t ((:tuple tv0 (zval:vec v0)) (:tuple tv1 (zval:vec v1)) (:tuple tm (zval:vec m)))
+      env t ((:tuple tv0 (zval:vec v0)) (:tuple tv1 (zval:vec v1)) (:tuple tm (zval:vec m)))
       -> (let ((vlen (vector-length v0))
                (mlen (vector-length m))
                (rvec (make-vector mlen (zval:big big/0))))
@@ -268,65 +268,79 @@
                    (set! rvec[i] v0[j])
                    (set! rvec[i] v1[(- j vlen)]))))
            (zval:vec rvec))
-      t ((:tuple tv0 (zval:vec v0)) (:tuple tm (zval:vec m)))
+      env t ((:tuple tv0 (zval:vec v0)) (:tuple tm (zval:vec m)))
       -> (let ((mlen (vector-length m))
                (rvec (make-vector mlen (zval:big big/0))))
            (for-range i mlen
              (set! rvec[i] v0[(zval->int m[i])]))
            (zval:vec rvec))
-      t args -> (impossible)
+      env t args -> (impossible)
       )
 
     (define prim-get
-      t ((:tuple tv (zval:ref r))) -> r.cell
-      t ((:tuple tv (zval:vref {cell=(zval:vec v)} i))) -> v[i]
+      env t ((:tuple tv (zval:ref r))) -> r.cell
+      env t ((:tuple tv (zval:vref {cell=(zval:vec v)} i))) -> v[i]
       ;; hack: pass-through %get
-      t ((:tuple tv v)) -> v
-      t args -> (impossible)
+      env t ((:tuple tv v)) -> v
+      env t args -> (impossible)
       )
 
     (define prim-set
-      t ((:tuple tv (zval:ref r)) (:tuple tx x))
+      env t ((:tuple tv (zval:ref r)) (:tuple tx x))
       -> (begin (set! r.cell x) (zval:big big/0))
-      t ((:tuple tv (zval:vref {cell=(zval:vec v)} i)) (:tuple tx x))
+      env t ((:tuple tv (zval:vref {cell=(zval:vec v)} i)) (:tuple tx x))
       -> (begin (set! v[i] x) (zval:big big/0))
-      t args
+      env t args
       -> (impossible)
       )
 
     (define prim-vref
-      rtype ((:tuple tvec (zval:ref {cell=v})) (:tuple ti (zval:big index)))
+      env rtype ((:tuple tvec (zval:ref {cell=v})) (:tuple ti (zval:big index)))
       -> (zval:vref {cell=v} (big->int index))
-      rtype ((:tuple tvec (zval:vec v)) (:tuple ti (zval:big index)))
+      env rtype ((:tuple tvec (zval:vec v)) (:tuple ti (zval:big index)))
       -> v[(big->int index)]
-      _ _
+      _ _ _
       -> (impossible)
       )
 
-    (define build-type
-      (type:none)  -> (zval:big big/0)
-      (type:int _) -> (zval:big big/0)
-      (type:ref t) -> (zval:ref {cell=(build-type t)})
-      (type:mut t) -> (zval:ref {cell=(build-type t)})
-      (type:vec v? (itype:fix size) t) -> (zval:vec
-                                           (list->vector
-                                            (map
-                                             (lambda (x) (build-type t))
-                                             (range size))))
-      t -> (raise (:Eval/BadType t))
+    (define (build-type env t)
+      (match t with
+        (type:none)          -> (zval:big big/0)
+        (type:int _)         -> (zval:big big/0)
+        (type:ref t)         -> (zval:ref {cell=(build-type env t)})
+        (type:mut t)         -> (zval:ref {cell=(build-type env t)})
+        (type:vec v? size t) -> (zval:vec
+                                 (list->vector
+                                  (map
+                                   (lambda (x) (build-type env t))
+                                   (range (get-size env size)))))
+        t -> (raise (:Eval "Bad Type" (type-repr t)))
+        ))
+
+    (define get-size
+      env (itype:fix size) -> size
+      env (itype:dyn name) -> (begin
+                                (printf "get-size: " (sym name) "\n")
+                                (match (alist/lookup env name) with
+                                  (maybe:yes (:tuple tv v))
+                                  -> (zval->int v)
+                                  (maybe:no)
+                                  -> (raise (:Eval "failed to look up ityp:dyn size" ""))
+                                  ))
+      env _ -> (impossible)
       )
 
     (define prim-alloca
-      t ()
-      -> (build-type t)
-      _ args
-      -> (raise (:Eval/BadArgs args))
+      env t ()
+      -> (build-type env t)
+      env t args
+      -> (raise (:Eval "alloca: Bad Args" ""))
       )
 
     (define print-int
       ;; XXX print this at correct bit-width in hex.
-      ty ((:tuple tx x)) -> (begin (printf (bold (zval-repr tx x)) "\n") (zval:big (big:zero)))
-      ty _   -> (impossible)
+      env ty ((:tuple tx x)) -> (begin (printf (bold (zval-repr tx x)) "\n") (zval:big (big:zero)))
+      env ty _   -> (impossible)
       )
 
     (define prim-alist
@@ -362,7 +376,7 @@
       env kenv (cvar:t k) args
       -> (match (alist/lookup kenv k) with
            (maybe:no)
-           -> (raise (:Eval/UnknownContinuation k))
+           -> (raise (:Eval "Unknown Continuation" (format (sym k))))
            (maybe:yes (:tuple vars K))
            -> (E (extend* env vars (lookup* env args)) kenv K)
            ))
@@ -376,7 +390,7 @@
       -> (match (alist/lookup prim-alist prim) with
            (maybe:yes fun)
            -> (let ((vals (lookup* env args))
-                    (rval (fun tr vals)))
+                    (rval (fun env tr vals)))
                 (E (extend env r (:tuple tr rval)) kenv K))
            (maybe:no)
            -> (match (tree/member funmap symbol-index-cmp prim) with
@@ -395,7 +409,7 @@
                                            )))
                         kenv K))
                 (maybe:no)
-                -> (raise (:Eval/UnknownPrim prim))
+                -> (raise (:Eval "Unknown Prim" (format (sym prim))))
                 )))
 
     (define (E env kenv exp)

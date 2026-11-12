@@ -2,6 +2,8 @@
 
 ;; XXX could this be rewritten with walk-zexp?
 
+;; XXX need to rename (itype:dyn _)
+
 ;;
 ;;   here we can also build a map from newname -> (oldname, src)
 ;;
@@ -29,6 +31,23 @@
   (define RA
     env (azexp:t exp src typ)
     -> (azexp:t (R src env exp) src typ)
+    )
+
+  ;; because of itype:dyn, we need to rename types as well.
+  (define (RT env t)
+    (define RIT
+      (itype:dyn name) -> (itype:dyn (lookup env name))
+      t -> t
+      )
+    (define T
+      (type:vec v? size type) -> (type:vec (RIT v?) (RIT size) (T type))
+      (type:int size)         -> (type:int (RIT size))
+      (type:arrow tr targs)   -> (type:arrow (T tr) (map T targs))
+      (type:ref t)            -> (type:ref (T t))
+      (type:mut t)            -> (type:mut (T t))
+      t                       -> t
+      )
+    (T t)
     )
 
   ;; XXX do we need to pass src here?  how/where will we need it?  actually I think we
@@ -60,7 +79,7 @@
   (define extend
     env (aztname:t name type src)
     -> (let ((name0 (gensym name)))
-         (:tuple (aztname:t name0 type src)
+         (:tuple (aztname:t name0 (RT env type) src)
                  (alist:entry name name0 env)))
     )
 

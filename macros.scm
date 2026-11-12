@@ -204,8 +204,8 @@
     ;; "We then check whether the variables of p include at least one
     ;;   variable of level greater than 0."
 
-    (define controllable
-      (alist:entry k (:tuple 0 v) env) -> (controllable env)
+    (define controllable?
+      (alist:entry k (:tuple 0 v) env) -> (controllable? env)
       (alist:entry k (:tuple _ _) _)   -> #t
       (alist:nil)                      -> #f
       )
@@ -251,7 +251,7 @@
       )
 
     (let ((env0 (fv env p)))
-      (when (not (controllable env0))
+      (when (not (controllable? env0))
         (raise (:MBE/BadOutputPattern (sexpat-repr p))))
       (check-lengths env0)
       (let loop ((env1 env0)

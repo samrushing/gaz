@@ -35,6 +35,9 @@
   (cvar:t a) (cvar:t b) -> (symbol-index-cmp a b)
   )
 
+;; XXX HACK
+(define type-apply-subst apply-subst)
+
 (define (rewrite-cps exp)
 
   (let ((vcount (make-census cmp-var))  ;; variable/function usage counts
@@ -89,8 +92,47 @@
     (define lookup-cenv (cvar:t k) env -> (alist/lookup env k))
 
     (define (substitute-vars subst exp)
+
       (define (S x)
-        (apply-vsubst subst x))
+        (match (apply-vsubst subst x) with
+          (var:t name type)
+          -> (var:t name (T (type-apply-subst type)))
+          ))
+
+      (define TI
+        (itype:dyn name)
+        -> (match subst with
+             (:tuple Sv Sk)
+             -> (match (tree/member Sv var-cmp (var:t name none)) with
+                  (maybe:yes (var:t name0 type0))
+                  -> (begin
+                       (printf "replacing name " (sym name) " with " (sym name0) "\n")
+                       (itype:dyn name0))
+                  _ -> (itype:dyn name)
+                  ))
+        ;; -> (match (apply-vsubst subst (var:t name none)) with
+        ;;      (var:t name0 type0)
+        ;;      -> (begin
+        ;;           (printf "replacing name " (sym name) " with " (sym name0) "\n")
+        ;;           (itype:dyn name0)
+        ;;           )
+        ;;      )
+        t -> t
+        )
+
+      (define T*
+        (type:vec v? size base) -> (type:vec (TI v?) (TI size) (T base))
+        (type:arrow rt txs)     -> (type:arrow (T rt) (map T txs))
+        (type:ref t)            -> (type:ref (T t))
+        (type:mut t)            -> (type:mut (T t))
+        t                       -> t
+        )
+
+      (define (T t)
+        (let ((t0 (T* t)))
+          (printf (ansi red " --- ") (ftype t) " => " (ftype t0) "\n")
+          t0))
+
       (define R
         (cps:prim n p x vars k)  -> (cps:prim n p (S x) (map S vars) (R k))
         (cps:letval x v k)       -> (cps:letval (S x) v (R k))
@@ -100,7 +142,15 @@
         (cps:if tst c a)         -> (cps:if (S tst) c a)
         (cps:dead k)             -> (cps:dead (R k))
         )
-      ;; (printf "substitute-vars\n")
+      (printf "substitute-vars\n")
+      (match subst with
+        (:tuple Sv Sk)
+        -> (match (tree/member Sv var-cmp (var:t 'u_len1 none)) with
+             (maybe:yes (var:t x tx))
+             -> (printf " u_len1 => " (sym x) "\n")
+             _
+             -> (printf " u_len1 ?\n")
+             ))
       (R exp))
 
     (define (simp venv cenv S K)
@@ -123,6 +173,11 @@
         )
 
       (define (subst/v x)
+        (match x with
+          (var:t 'u_len1 t)
+          -> (printf "seeing u_len1 here\n")
+          _
+          -> #u)
         (apply-vsubst S x))
 
       (define (subst/k k)
@@ -172,7 +227,14 @@
              (if (and (= 0 (ccount.get k0)) (= 1 (acount.get k0)))
                  (match (lookup-cenv k0 cenv) with
                    (maybe:yes (:tuple xs K0))
-		   -> (N 'beta-cont-2 (substitute-vars (extend-vsubst* S xs ys0) K0))
+		   -> (begin
+                        (printf "substs: {\n")
+                        (for-list2 k v xs ys0
+                          (printf " : " (sym (var/name k)) (bold " = ") (sym (var/name v)) "\n"))
+                        (printf "}\n")
+                        (dump-cps 4 K0)
+                        (N 'beta-cont-2 (substitute-vars (extend-vsubst* S xs ys0) K0))
+                       )
                    _ -> (cps:appk k0 ys0))
                  (cps:appk k0 ys0)
 		 ))
