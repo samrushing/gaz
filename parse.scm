@@ -648,7 +648,7 @@
       (match other with
         (:tuple ann exp)
         -> (let ((exp0 (transform menv exp)))
-             (pp-src ann exp0 80)
+             (verbose (pp-src ann exp0 80))
              ;; (dump-ann-sexp 0 exp)
              ;; (printf "\n")
              ;; (dump-ann-sexp 0 exp0)
@@ -657,10 +657,10 @@
              (let (((name ztop) (parse-toplevel exp0)))
                (push! tops ztop)
                ;;(dump-azexp 0 zexp)
-               (dump-ztop ztop)
-               (printf "\n"))
+               (verbose (dump-ztop ztop))
+               (verbose (printf "\n")))
              )))
-    (printf "done\n")
+    (verbose (printf "done\n"))
     (reverse tops)
     ))
 

@@ -320,7 +320,7 @@
     (define get-size
       env (itype:fix size) -> size
       env (itype:dyn name) -> (begin
-                                (printf "get-size: " (sym name) "\n")
+                                (trace (printf "get-size: " (sym name) "\n"))
                                 (match (alist/lookup env name) with
                                   (maybe:yes (:tuple tv v))
                                   -> (zval->int v)
@@ -481,7 +481,7 @@
     (match (tree/member funmap symbol-index-cmp 'main) with
       (maybe:yes (:tuple ftype formals body))
       -> (begin
-           (printf (ansi green "evaluating...\n"))
+           (verbose (printf (ansi green "evaluating...\n")))
            (eval-fun env funmap ftype formals body 0 quiet?)
            0)
       (maybe:no)

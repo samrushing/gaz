@@ -18,7 +18,7 @@
 (define sig-prim-arith
   env param rtype args
   -> (begin
-       (printf "U arith (" (join ftype ", " args) ") -> " (ftype rtype) "\n")
+       (trace (printf "U arith (" (join ftype ", " args) ") -> " (ftype rtype) "\n"))
        (for-list arg args (unify env rtype arg))
        (vector-check env rtype)))
 
@@ -213,19 +213,19 @@
     env ty (zlit:vec lits)
     -> (let ((tv (new-tvar))
              (tsz (itype:fix (vector-length lits))))
-         (printf "Slit vec ty=" (type-repr ty) " tsz=" (repr (itype->sexp tsz)) "\n")
+         (trace (printf "Slit vec ty=" (type-repr ty) " tsz=" (repr (itype->sexp tsz)) "\n"))
          (unify env ty (type:vec (new-itvar) tsz tv)) ;; XXX bvar
          (for-vector lit lits
-           (printf "each lit\n")
+           (trace (printf "each lit\n"))
            (Slit env tv lit))))
 
   (define (S env exp)
-    (printf "S:\n")
+    (trace (printf "S:\n"))
     (match exp with
       (cps:prim name param (var:t x tx) xs K)
       -> (begin
-           (printf "S prim " (sym name) " " (repr param) " " (sym x) ":" (repr (type->sexp tx))
-                   " (" (join fvart " " xs) ")\n")
+           (trace (printf "S prim " (sym name) " " (repr param) " " (sym x) ":" (repr (type->sexp tx))
+                   " (" (join fvart " " xs) ")\n"))
          (match (alist/lookup prim-type-map name) with
            (maybe:yes fun)
            -> (let ((txs (map var->type xs)))
@@ -247,7 +247,7 @@
                 )))
       (cps:letval (var:t x tx) val K)
       -> (begin
-           (printf "Slit " (type-repr tx) " ==? " (zlit-repr val) "\n")
+           (trace (printf "Slit " (type-repr tx) " ==? " (zlit-repr val) "\n"))
            (Slit env tx val)
            (S env K))
       (cps:letcont (cvar:t k) xs K0 K1)
@@ -416,8 +416,8 @@
     (apply-subst (azexp/type exp)))
 
   (define (Sprim env ty name param xs)
-    (printf "Sprim " (sym name) " " (repr param) " " (type-repr* ty)
-            " (" (join type-repr* " " (map exp->type xs)) ")\n")
+    (trace (printf "Sprim " (sym name) " " (repr param) " " (type-repr* ty)
+            " (" (join type-repr* " " (map exp->type xs)) ")\n"))
     (match (alist/lookup prim-type-map name) with
       (maybe:yes fun)
       -> (begin
@@ -440,9 +440,9 @@
       (type:arrow rtype argtypes)
       -> (begin
            ;; XXX we need to 'instantiate' ftype's formals-vs-args
-           (printf "Scall targ " (ftype rtype) " args " (join ftype ", " argtypes) "\n")
+           (trace (printf "Scall targ " (ftype rtype) " args " (join ftype ", " argtypes) "\n"))
            (for-list2 arg targ args (map undyn-type argtypes)
-             (printf "  arg " (ftype targ) "\n")
+             (trace (printf "  arg " (ftype targ) "\n"))
              (S env targ arg))
            (unify env ty rtype))
       _
@@ -452,7 +452,7 @@
   (define S
     env ty0 (azexp:t exp src ty1)
     -> (begin
-         (printf "S " (sym (zexp->kind exp)) "\n")
+         (trace (printf "S " (sym (zexp->kind exp)) "\n"))
          (unify env ty0 ty1)
          (S* env ty0 exp))
     )

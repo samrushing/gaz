@@ -106,7 +106,7 @@
              -> (match (tree/member Sv var-cmp (var:t name none)) with
                   (maybe:yes (var:t name0 type0))
                   -> (begin
-                       (printf "replacing name " (sym name) " with " (sym name0) "\n")
+                       (trace (printf "replacing name " (sym name) " with " (sym name0) "\n"))
                        (itype:dyn name0))
                   _ -> (itype:dyn name)
                   ))
@@ -130,7 +130,7 @@
 
       (define (T t)
         (let ((t0 (T* t)))
-          (printf (ansi red " --- ") (ftype t) " => " (ftype t0) "\n")
+          (trace (printf (ansi red " --- ") (ftype t) " => " (ftype t0) "\n"))
           t0))
 
       (define R
@@ -142,15 +142,6 @@
         (cps:if tst c a)         -> (cps:if (S tst) c a)
         (cps:dead k)             -> (cps:dead (R k))
         )
-      (printf "substitute-vars\n")
-      (match subst with
-        (:tuple Sv Sk)
-        -> (match (tree/member Sv var-cmp (var:t 'u_len1 none)) with
-             (maybe:yes (var:t x tx))
-             -> (printf " u_len1 => " (sym x) "\n")
-             _
-             -> (printf " u_len1 ?\n")
-             ))
       (R exp))
 
     (define (simp venv cenv S K)
@@ -158,7 +149,7 @@
       (define (N s e)
 	;; notify that a pass has a hit
         (inc! nopt)
-        (printf "N " (sym s) "\n")
+        (trace (printf "N " (sym s) "\n"))
 	;; (printf (sym s) " " (cps-repr K) "\n")
 	;; (printf "  : " (cps-repr e) "\n")
 	e)
@@ -173,11 +164,6 @@
         )
 
       (define (subst/v x)
-        (match x with
-          (var:t 'u_len1 t)
-          -> (printf "seeing u_len1 here\n")
-          _
-          -> #u)
         (apply-vsubst S x))
 
       (define (subst/k k)
@@ -228,11 +214,11 @@
                  (match (lookup-cenv k0 cenv) with
                    (maybe:yes (:tuple xs K0))
 		   -> (begin
-                        (printf "substs: {\n")
-                        (for-list2 k v xs ys0
-                          (printf " : " (sym (var/name k)) (bold " = ") (sym (var/name v)) "\n"))
-                        (printf "}\n")
-                        (dump-cps 4 K0)
+                        (trace (printf "substs: {\n"))
+                        (trace (for-list2 k v xs ys0
+                          (printf " : " (sym (var/name k)) (bold " = ") (sym (var/name v)) "\n")))
+                        (trace (printf "}\n"))
+                        (trace (dump-cps 4 K0))
                         (N 'beta-cont-2 (substitute-vars (extend-vsubst* S xs ys0) K0))
                        )
                    _ -> (cps:appk k0 ys0))
@@ -266,12 +252,12 @@
       ;; (printf "vcount:\n") (vcount.dump fvar)
       ;; (printf "ccount:\n") (ccount.dump fcvar)
       ;; (printf (int n) " " (cps-repr exp) "\n")
-      (printf (int n) "\n")
-      (dump-cps 1 exp)
+      (trace (printf (int n) "\n"))
+      (trace (dump-cps 1 exp))
       (let ((exp0 (simp (alist:nil) (alist:nil)
                         (:tuple (tree/empty) (tree/empty))
                         exp)))
-        (printf "opt: " (int n) " " (int nopt) "\n")
+        (trace (printf "opt: " (int n) " " (int nopt) "\n"))
         (if (or (= nopt 0) (= n 0))
 	    exp
 	    (loop (- n 1) exp0)))

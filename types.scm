@@ -276,10 +276,10 @@
         )))
 
   (define (U t0 t1)
-    (printf "U  " (sexp (type->sexp t0)) " " (sexp (type->sexp t1)) "\n")
+    (trace (printf "U  " (sexp (type->sexp t0)) " " (sexp (type->sexp t1)) "\n"))
     (let ((u (type-find type-isvar? t0))
           (v (type-find type-isvar? t1)))
-      (printf "U* " (type-repr u) " " (type-repr v) "\n")
+      (trace (printf "U* " (type-repr u) " " (type-repr v) "\n"))
       (when (not (eq? u v))
         (match u v with
           (type:none) (type:none)

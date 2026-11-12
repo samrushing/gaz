@@ -4,6 +4,7 @@
 (require "lib/cmap.scm")
 (require "lib/partial.scm")
 (require "lib/getopt.scm")
+(require "./flags.scm")
 (require "./read.scm")
 (require "./macros.scm")
 (require "./parse.scm")
@@ -22,8 +23,8 @@
 (define program-options
   (makeopt
    (flag 'eval)
-   (flag 'quiet)
    (flag 'v)
+   (flag 'd)
    (flag 'nr)
    (pos+ 'paths (string))
    ))
@@ -40,7 +41,8 @@
   (printf "Gaz compiler.\n\n")
   (printf "Usage: " sys.argv[0] " <src>\n"
           "  [-eval] invoke the interpreter (requires a 'main' function).\n"
-          "  [-v] verbose output.\n"
+          "  [-v] verbose: show the program after each pass.\n"
+          "  [-d] debug: trace the type solvers, rewriter and evaluator.\n"
           "  [-nr] no rewrite phase.\n"
           "example: $ " sys.argv[0] " thingy.scm\n")
   (%exit #f -1))
@@ -66,7 +68,6 @@
     env ((aztname:t x tx _) . tl) -> (formals->tenv (alist:entry x tx env) tl)
     )
   (let ((opts (get-options))
-        (quiet? #f)
         (eval? #f)
         (rewrite? #t)
         (paths '()))
@@ -74,8 +75,11 @@
       (set! eval? #t))
     (when-maybe v (get-bool-opt opts 'nr)
       (set! rewrite? #f))
-    (when-maybe v (get-bool-opt opts 'quiet)
-      (set! quiet? #t))
+    (when-maybe v (get-bool-opt opts 'v)
+      (set! gaz-flags.verbose #t))
+    (when-maybe v (get-bool-opt opts 'd)
+      (set! gaz-flags.verbose #t)
+      (set! gaz-flags.trace #t))
     (when-maybe v (get-string-opts opts 'paths)
       (set! paths v))
     ;; prepend our basis.
@@ -96,45 +100,42 @@
           (ztop:mac _ _ _)
           -> #u ;; probably going away
           ))
-      (printn (build-datatype-table))
+      (trace (printn (build-datatype-table)))
       (for-list fun (reverse funs)
         (match (alpha fun tenv) with
           (ztop:fun (aztname:t fname ftype fsrc) formals body)
           -> (let ((tenv0 (formals->tenv tenv formals))
-                   (_ (dump-azexp 0 body))
-                   (_ (printf "\nref-ref...\n"))
+                   (_ (verbose (dump-azexp 0 body)))
+                   (_ (verbose (printf "\nref-ref...\n")))
                    (body0 (ref-ref tenv0 body))
-                   (_ (dump-azexp 0 body0))
-                   (_ (printf "\nsolve types (zexp)...\n"))
+                   (_ (verbose (dump-azexp 0 body0)))
+                   (_ (verbose (printf "\nsolve types (zexp)...\n")))
                    (_ (solve-zexp tenv0 body0))
-                   (_ (dump-azexp 0 body0))
-                   (_ (printf "\nzexp->cps...\n"))
+                   (_ (verbose (dump-azexp 0 body0)))
+                   (_ (verbose (printf "\nzexp->cps...\n")))
                    (cps0 (zexp->cps tenv0 body0))
-                   (_ (printf "\ncps0:\n"))
-                   (_ (dump-cps 0 cps0))
-                   (_ (printf "early solve...\n"))
+                   (_ (verbose (printf "\ncps0:\n") (dump-cps 0 cps0)))
+                   (_ (verbose (printf "early solve...\n")))
                    (_ (solve tenv (alist:entry 'halt (list ftype) (alist:nil)) cps0))
-                   (_ (printf "rewrite...\n"))
+                   (_ (verbose (printf "rewrite...\n")))
                    (cps1 (if rewrite? (rewrite-cps cps0) cps0))
                    )
-               ;; (printf "\ncps0:\n")
-               ;; (dump-cps 0 cps0)
-               (printf "\ncps1:\n")
-               (dump-cps 0 cps1)
+               (verbose (printf "\ncps1:\n") (dump-cps 0 cps1))
                (solve tenv (alist:entry 'halt (list ftype) (alist:nil)) cps1)
-               (printf "\ndefault-vec-index...\n")
+               (verbose (printf "\ndefault-vec-index...\n"))
                (default-vec-index cps1 (type:int (itype:fix 32)))
                (let ((cps2 (cps-subst cps1))
                      (cps3 (strip-void cps2)))
-                 (printf "\n" (bold (sym fname)) " typed (& stripped):\n")
-                 (dump-cps 0 cps3)
+                 (verbose
+                  (printf "\n" (bold (sym fname)) " typed (& stripped):\n")
+                  (dump-cps 0 cps3))
                  (push! compiled (:tuple fname ftype formals cps3))
                  ))
           _
           -> #u
           ))
       (if eval?
-          (eval tenv compiled lits quiet?)
+          (eval tenv compiled lits (not gaz-flags.trace))
           (compiled->llvm (last paths) tenv (reverse compiled) lits))
       )))
 
