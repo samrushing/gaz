@@ -219,7 +219,7 @@ Gaz uses CPS as its intermediate representation.  Modern (imperative)
 compilers like LLVM use SSA.  Functional compilers often use CPS.  But
 CPS and SSA are like two sides of the same coin, mathematical 'duals'
 if you will.  If CPS is 'goto with arguments', SSA is 'comefrom with
-arguments.
+arguments'.
 
 The CPS transform used here is based on Andrew Kennedy's excellent
 paper "Compiling with Continuations, Continued".
