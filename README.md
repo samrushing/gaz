@@ -17,6 +17,20 @@ Goals
     * promote functional style to ease the task of making formal proofs.
     * output: a C-compatible library for constant-time crypto.
 
+
+Historical Note - 2026
+----------------------
+
+This repo has been bit-rotting on my machine for 7 years.  I decided to
+bring it back and whip it into good enough shape to put on github.  There
+are plans to make this actually useful - see `docs/design.md`.
+
+I ended up _not_ using this for Irken's crypto/networking libraries - the
+missing piece was a p256 implementation, which I built using fiat-crypto.
+
+However, I view that as a 'minimalist' solution to the TLS problem, and would
+love to use something like gaz to do more.
+
 Why?
 ----
 
