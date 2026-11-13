@@ -218,8 +218,8 @@ CPS vs SSA, letcont
 Gaz uses CPS as its intermediate representation.  Modern (imperative)
 compilers like LLVM use SSA.  Functional compilers often use CPS.  But
 CPS and SSA are like two sides of the same coin, mathematical 'duals'
-if you will.  If CPS is 'goto with arguments', SSA is 'comefrom with
-arguments'.
+if you will.  If CPS is 'goto with arguments', SSA is
+'[comefrom](https://en.wikipedia.org/wiki/COMEFROM) with arguments'.
 
 The CPS transform used here is based on Andrew Kennedy's excellent
 paper "Compiling with Continuations, Continued".
