@@ -15,11 +15,7 @@
 
 (defmacro oprintf
   (oprintf x ...)
-  -> (begin
-       (file/write ofile (format x ...))
-       ;; XXX DO NOT LEAVE THIS HERE
-       (file/flush ofile)
-       )
+  -> (file/write ofile (format x ...))
   )
 
 (define (clean s)
