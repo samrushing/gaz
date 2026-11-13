@@ -79,16 +79,16 @@ Sample Code
 
 The xoroshiro128+ random number generator (`tests/xoroshiro.scm`):
 
-    ```scheme
-    (define (xoroshiro128+:i64 s:(mut (vec 2 i64)))
-      (let ((s0:i64 s[0])
-            (s1:i64 s[1])
-            (p:i64 (+ s0 s1))
-            (x:i64 (xor s0 s1)))
-        (set! s[0] (xor (<<< s0 24) x (<< x 16)))
-        (set! s[1] (<<< x 37))
-        p))
-    ```
+```scheme
+(define (xoroshiro128+:i64 s:(mut (vec 2 i64)))
+  (let ((s0:i64 s[0])
+        (s1:i64 s[1])
+        (p:i64 (+ s0 s1))
+        (x:i64 (xor s0 s1)))
+    (set! s[0] (xor (<<< s0 24) x (<< x 16)))
+    (set! s[1] (<<< x 37))
+    p))
+```
 
 `name:type` declares a typed name, `s[0]` indexes a vector, `<<<` is
 rotate-left.  A `let` binding is immutable; only a `(mut ...)` can be
@@ -160,35 +160,35 @@ The larger Gaz language is defined by the macro transformations in `gaz-basis.sc
 
 For example, the `*` operation:
 
-    ```scheme
-    (defmacro *
-      (* x)       -> x
-      (* a b ...) -> (%prim * a (* b ...))
-      )
-    ```
+```scheme
+(defmacro *
+  (* x)       -> x
+  (* a b ...) -> (%prim * a (* b ...))
+  )
+```
 
 With that macro, the following expression...
 
-    ```scheme
-    (* x 7 c)
-    ```
+```scheme
+(* x 7 c)
+```
 
 ...transforms into:
 
-    ```scheme
-    (%prim * x (%prim * 7 c))
-    ```
+```scheme
+(%prim * x (%prim * 7 c))
+```
 
 A more complex macro...
 
-    ```scheme
-    (defmacro while
-      (while test body ...)
-      -> (let $loop ()
-           (when test
-             body ...
-             (goto $loop))))
-     ```
+ ```scheme
+ (defmacro while
+   (while test body ...)
+   -> (let $loop ()
+        (when test
+          body ...
+          (goto $loop))))
+  ```
 
 ... adds the `while` form.  It translates into a lower-level
 construct `let loop`, which in turn uses other macros, like `when`.
